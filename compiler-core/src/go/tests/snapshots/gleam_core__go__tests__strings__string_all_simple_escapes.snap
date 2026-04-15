@@ -1,0 +1,18 @@
+---
+source: compiler-core/src/go/tests/strings.rs
+assertion_line: 40
+expression: "\npub fn go() -> String {\n  \"\\r\\t\\f\"\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> String {
+  "\r\t\f"
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() string {
+  return "\r\t\f"
+}

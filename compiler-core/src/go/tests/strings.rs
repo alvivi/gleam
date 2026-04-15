@@ -32,3 +32,59 @@ pub fn go() -> String {
 "#,
     );
 }
+
+#[test]
+fn string_all_simple_escapes() {
+    assert_go!(
+        r#"
+pub fn go() -> String {
+  "\r\t\f"
+}
+"#,
+    );
+}
+
+#[test]
+fn string_unicode_escape_bmp() {
+    assert_go!(
+        r#"
+pub fn go() -> String {
+  "\u{00E9}"
+}
+"#,
+    );
+}
+
+#[test]
+fn string_unicode_escape_short_hex_is_padded() {
+    assert_go!(
+        r#"
+pub fn go() -> String {
+  "\u{A}"
+}
+"#,
+    );
+}
+
+#[test]
+fn string_unicode_escape_astral() {
+    assert_go!(
+        r#"
+pub fn go() -> String {
+  "\u{1F600}"
+}
+"#,
+    );
+}
+
+#[test]
+fn string_multiline_raw_newline() {
+    assert_go!(
+        "
+pub fn go() -> String {
+  \"line one
+line two\"
+}
+",
+    );
+}

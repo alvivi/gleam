@@ -1,0 +1,18 @@
+---
+source: compiler-core/src/go/tests/strings.rs
+assertion_line: 79
+expression: "\npub fn go() -> String {\n  \"\\u{1F600}\"\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> String {
+  "\u{1F600}"
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() string {
+  return "\U0001F600"
+}
