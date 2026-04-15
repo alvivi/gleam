@@ -1,0 +1,19 @@
+---
+source: compiler-core/src/go/tests/strings.rs
+assertion_line: 92
+expression: "\npub fn go() -> String {\n  \"line one\nline two\"\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> String {
+  "line one
+line two"
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() string {
+  return "line one\nline two"
+}

@@ -1,0 +1,18 @@
+---
+source: compiler-core/src/go/tests/strings.rs
+assertion_line: 53
+expression: "\npub fn go() -> String {\n  \"\\u{00E9}\"\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> String {
+  "\u{00E9}"
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() string {
+  return "\u00E9"
+}

@@ -448,17 +448,48 @@ fn numeric_literal<'a>(type_name: &'static str, value: &str) -> Document<'a> {
 }
 
 fn string_literal<'a>(value: &str) -> Document<'a> {
-    // Gleam stores string literals with escape sequences preserved as source
-    // text; Go's string-literal syntax is a superset for those cases so they
-    // can be emitted verbatim. Literal newlines in multi-line strings still
-    // need re-escaping. Gleam's `\u{NNNN}` escape differs from Go's `\uNNNN`
-    // and is not yet rewritten.
-    let body: EcoString = if value.contains('\n') {
-        value.replace('\n', r"\n").into()
-    } else {
-        value.into()
-    };
-    docvec!["\"", body.to_doc(), "\""]
+    // The Gleam lexer stores `\n \r \t \f \" \\` as two-char sequences and
+    // `\u{hex}` as literal `\u{...}` text; all other bytes are verbatim.
+    // Go's interpreted-string form accepts the two-char escapes with the
+    // same meaning, but rejects `\u{...}` (it demands `\uNNNN` for the BMP
+    // or `\UNNNNNNNN` for astral codepoints), and forbids raw newlines.
+    // We walk the value in whole-escape units so a literal backslash
+    // (encoded `\\`) isn't mistaken for the start of a `\u` sequence.
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\n' => out.push_str(r"\n"),
+            '\\' => match chars.next() {
+                Some('u') => {
+                    let _ = chars.next();
+                    let mut hex = String::new();
+                    for d in chars.by_ref() {
+                        if d == '}' {
+                            break;
+                        }
+                        hex.push(d);
+                    }
+                    let codepoint = u32::from_str_radix(&hex, 16)
+                        .expect("unicode escape validated by lexer");
+                    if codepoint <= 0xFFFF {
+                        out.push_str(&format!("\\u{codepoint:04X}"));
+                    } else {
+                        out.push_str(&format!("\\U{codepoint:08X}"));
+                    }
+                }
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            },
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+    EcoString::from(out).to_doc()
 }
 
 fn go_identifier(name: &str, public: bool) -> EcoString {
