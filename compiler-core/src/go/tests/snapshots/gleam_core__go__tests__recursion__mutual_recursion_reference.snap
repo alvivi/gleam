@@ -1,0 +1,25 @@
+---
+source: compiler-core/src/go/tests/recursion.rs
+expression: "\npub fn ping(n: Int) -> Int {\n  pong(n + 1)\n}\n\npub fn pong(n: Int) -> Int {\n  ping(n + 1)\n}\n"
+---
+----- SOURCE CODE
+
+pub fn ping(n: Int) -> Int {
+  pong(n + 1)
+}
+
+pub fn pong(n: Int) -> Int {
+  ping(n + 1)
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Pong(n int64) int64 {
+  return Ping((n + int64(1)))
+}
+
+func Ping(n int64) int64 {
+  return Pong((n + int64(1)))
+}

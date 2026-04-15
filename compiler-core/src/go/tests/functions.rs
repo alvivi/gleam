@@ -69,3 +69,48 @@ pub fn type_() -> Int {
 "#,
     );
 }
+
+#[test]
+fn direct_call_same_module_public() {
+    assert_go!(
+        r#"
+pub fn double(x: Int) -> Int {
+  x + x
+}
+
+pub fn four() -> Int {
+  double(2)
+}
+"#,
+    );
+}
+
+#[test]
+fn direct_call_same_module_private() {
+    assert_go!(
+        r#"
+fn helper(x: Int) -> Int {
+  x + 1
+}
+
+pub fn go() -> Int {
+  helper(41)
+}
+"#,
+    );
+}
+
+#[test]
+fn multiple_args() {
+    assert_go!(
+        r#"
+pub fn add(a: Int, b: Int) -> Int {
+  a + b
+}
+
+pub fn go() -> Int {
+  add(1, 2)
+}
+"#,
+    );
+}

@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/recursion.rs
+expression: "\npub fn loop_forever(n: Int) -> Int {\n  loop_forever(n + 1)\n}\n"
+---
+----- SOURCE CODE
+
+pub fn loop_forever(n: Int) -> Int {
+  loop_forever(n + 1)
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func LoopForever(n int64) int64 {
+  return LoopForever((n + int64(1)))
+}
