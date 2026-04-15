@@ -1,0 +1,30 @@
+---
+source: compiler-core/src/go/tests/blocks.rs
+expression: "\npub fn go() -> Int {\n  let x = 1\n  let y = {\n    let x = 100\n    x\n  }\n  x + y\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  let x = 1
+  let y = {
+    let x = 100
+    x
+  }
+  x + y
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  x := int64(1)
+  _ = x
+  y := (func() int64 {
+    x_1 := int64(100)
+    _ = x_1
+    return x_1
+  }())
+  _ = y
+  return (x + y)
+}

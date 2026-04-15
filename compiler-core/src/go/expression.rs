@@ -214,6 +214,7 @@ impl<'a> Generator<'a> {
                 name, constructor, ..
             } => self.var(name, constructor),
             TypedExpr::Call { fun, arguments, .. } => self.call(fun, arguments),
+            TypedExpr::Block { statements, .. } => self.block(statements, &expression.type_()),
             TypedExpr::BinOp {
                 name, left, right, ..
             } => self.bin_op(*name, left, right),
@@ -262,6 +263,34 @@ impl<'a> Generator<'a> {
         } else {
             unimplemented!("Go codegen: cross-module calls land in a later milestone")
         }
+    }
+
+    fn block(&mut self, statements: &'a [TypedStatement], type_: &Type) -> Document<'a> {
+        // Gleam blocks are expressions returning the last statement's value;
+        // Go blocks are not. Wrap in an IIFE so the block's value slots back
+        // into the surrounding expression context. Statement lifting is the
+        // cleaner long-term fix but requires a statement accumulator thread
+        // through every expression site — deferred until M3 when `case`
+        // forces the refactor.
+        let saved_names = self.local_names.clone();
+        let last_idx = statements.len().saturating_sub(1);
+        let body_docs = statements
+            .iter()
+            .enumerate()
+            .map(|(i, stmt)| self.statement(stmt, i == last_idx))
+            .collect_vec();
+        self.local_names = saved_names;
+
+        let body = Document::Vec(Itertools::intersperse(body_docs.into_iter(), line()).collect());
+        let return_type = self.go_type(type_);
+        docvec![
+            "(func() ",
+            return_type,
+            " {",
+            docvec![line(), body].nest(INDENT),
+            line(),
+            "}())",
+        ]
     }
 
     fn call(&mut self, fun: &'a TypedExpr, arguments: &'a [CallArg<TypedExpr>]) -> Document<'a> {

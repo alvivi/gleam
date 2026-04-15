@@ -1,0 +1,25 @@
+---
+source: compiler-core/src/go/tests/blocks.rs
+expression: "\npub fn go() -> Int {\n  {\n    {\n      1 + 2\n    }\n  }\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  {
+    {
+      1 + 2
+    }
+  }
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  return (func() int64 {
+    return (func() int64 {
+      return (int64(1) + int64(2))
+    }())
+  }())
+}
