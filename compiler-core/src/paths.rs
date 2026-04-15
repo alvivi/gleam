@@ -99,6 +99,7 @@ impl ProjectPaths {
         let target = match target {
             Target::Erlang => "erlang",
             Target::JavaScript => "javascript",
+            Target::Go => "go",
         };
         self.build_directory_for_mode(mode).join(target)
     }

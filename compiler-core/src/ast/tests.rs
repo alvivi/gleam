@@ -160,6 +160,7 @@ fn compile_expression(src: &str) -> TypedStatement {
             has_body: true,
             has_erlang_external: false,
             has_javascript_external: false,
+            has_go_external: false,
         },
         &mut problems,
     )
@@ -698,6 +699,7 @@ fn find_node_module_select() {
             name: "function".into(),
             external_erlang: None,
             external_javascript: None,
+            external_go: None,
             location: SrcSpan { start: 1, end: 55 },
             documentation: None,
             field_map: None,

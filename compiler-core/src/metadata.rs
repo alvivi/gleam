@@ -248,6 +248,7 @@ impl RemapIds {
                 implementations,
                 external_erlang,
                 external_javascript,
+                external_go,
                 purity,
             } => ValueConstructorVariant::ModuleFn {
                 name,
@@ -259,6 +260,7 @@ impl RemapIds {
                 implementations,
                 external_erlang,
                 external_javascript,
+                external_go,
                 purity,
             },
             ValueConstructorVariant::Record {

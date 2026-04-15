@@ -368,7 +368,13 @@ where
             TargetCodegenConfiguration::Erlang { app_file } => {
                 self.perform_erlang_codegen(modules, app_file.as_ref())
             }
+            TargetCodegenConfiguration::Go => self.perform_go_codegen(modules),
         }
+    }
+
+    fn perform_go_codegen(&mut self, modules: &[Module]) -> Result<(), Error> {
+        crate::codegen::Go::new(&self.out, &self.config.name).render(&self.io, modules)?;
+        Ok(())
     }
 
     fn perform_erlang_codegen(

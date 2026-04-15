@@ -220,6 +220,7 @@ impl<'comments> Formatter<'comments> {
             None => document,
             Some(Target::Erlang) => docvec!["@target(erlang)", line(), document],
             Some(Target::JavaScript) => docvec!["@target(javascript)", line(), document],
+            Some(Target::Go) => docvec!["@target(go)", line(), document],
         };
 
         comments.to_doc().append(document.group())
@@ -880,6 +881,7 @@ impl<'comments> Formatter<'comments> {
             documentation: _,
             external_erlang,
             external_javascript,
+            external_go,
             implementations: _,
             purity: _,
         } = function;
@@ -889,6 +891,7 @@ impl<'comments> Formatter<'comments> {
             .set_internal(*publicity)
             .set_external_erlang(external_erlang)
             .set_external_javascript(external_javascript)
+            .set_external_go(external_go)
             .to_doc();
 
         // Fn name and args
@@ -1889,6 +1892,7 @@ impl<'comments> Formatter<'comments> {
             typed_parameters: _,
             external_erlang,
             external_javascript,
+            external_go,
         } = type_;
 
         let _ = self.pop_empty_lines(location.end);
@@ -1898,6 +1902,7 @@ impl<'comments> Formatter<'comments> {
             .set_internal(*publicity)
             .set_external_erlang(external_erlang)
             .set_external_javascript(external_javascript)
+            .set_external_go(external_go)
             .to_doc();
 
         let doc = attributes
@@ -3636,6 +3641,7 @@ fn constant_call_arg_formatting<A, B>(
 struct AttributesPrinter<'a> {
     external_erlang: &'a Option<(EcoString, EcoString, SrcSpan)>,
     external_javascript: &'a Option<(EcoString, EcoString, SrcSpan)>,
+    external_go: &'a Option<(EcoString, EcoString, SrcSpan)>,
     deprecation: &'a Deprecation,
     internal: bool,
 }
@@ -3645,6 +3651,7 @@ impl<'a> AttributesPrinter<'a> {
         Self {
             external_erlang: &None,
             external_javascript: &None,
+            external_go: &None,
             deprecation: &Deprecation::NotDeprecated,
             internal: false,
         }
@@ -3663,6 +3670,14 @@ impl<'a> AttributesPrinter<'a> {
         external: &'a Option<(EcoString, EcoString, SrcSpan)>,
     ) -> Self {
         self.external_javascript = external;
+        self
+    }
+
+    pub fn set_external_go(
+        mut self,
+        external: &'a Option<(EcoString, EcoString, SrcSpan)>,
+    ) -> Self {
+        self.external_go = external;
         self
     }
 
@@ -3693,6 +3708,10 @@ impl<'a> Documentable<'a> for AttributesPrinter<'a> {
 
         if let Some((m, f, _)) = self.external_javascript {
             attributes.push(docvec!["@external(javascript, \"", m, "\", \"", f, "\")"])
+        };
+
+        if let Some((m, f, _)) = self.external_go {
+            attributes.push(docvec!["@external(go, \"", m, "\", \"", f, "\")"])
         };
 
         // @internal attribute
