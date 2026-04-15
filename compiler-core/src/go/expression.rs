@@ -462,9 +462,14 @@ fn string_literal<'a>(value: &str) -> Document<'a> {
 }
 
 fn go_identifier(name: &str, public: bool) -> EcoString {
+    // Preserve trailing underscores literally. Gleam uses a trailing `_` to
+    // escape keywords as identifiers (`type_`, `foo_`), so `foo` and `foo_`
+    // are distinct Gleam functions and must emit distinct Go names.
+    let trailing_underscores = name.chars().rev().take_while(|c| *c == '_').count();
+    let body = &name[..name.len() - trailing_underscores];
     let mut out = String::with_capacity(name.len());
     let mut capitalise = public;
-    for ch in name.chars() {
+    for ch in body.chars() {
         if ch == '_' {
             capitalise = true;
             continue;
@@ -475,6 +480,9 @@ fn go_identifier(name: &str, public: bool) -> EcoString {
         } else {
             out.push(ch);
         }
+    }
+    for _ in 0..trailing_underscores {
+        out.push('_');
     }
     if out.is_empty() {
         out.push('_');

@@ -12,6 +12,6 @@ pub fn type_() -> Int {
 ----- COMPILED GO
 package thepackage
 
-func Type() int64 {
+func Type_() int64 {
   return int64(0)
 }
