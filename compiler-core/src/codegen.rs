@@ -323,7 +323,8 @@ impl<'a> Go<'a> {
     fn go_module(&self, writer: &impl FileSystemWriter, module: &Module) -> Result<()> {
         let name = format!("{}.go", module.name);
         let path = self.output_directory.join(name);
-        let output = go::module(&module.ast, self.project_name);
+        let line_numbers = LineNumbers::new(&module.code);
+        let output = go::module(&module.ast, &line_numbers, self.project_name);
         tracing::debug!(name = ?module.name, "Generated Go module");
         writer.write(&path, &output)
     }

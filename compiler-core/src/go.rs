@@ -1,12 +1,15 @@
-use crate::ast::TypedModule;
+use crate::{ast::TypedModule, line_numbers::LineNumbers};
+
+mod expression;
 
 #[cfg(test)]
 mod tests;
 
 pub const GO_VERSION: &str = "1.21";
 
-pub fn module(_module: &TypedModule, package_name: &str) -> String {
-    format!("package {}\n", go_package_name(package_name))
+pub fn module(module: &TypedModule, line_numbers: &LineNumbers, package_name: &str) -> String {
+    let mut generator = expression::Generator::new(module, line_numbers, package_name);
+    generator.compile().to_pretty_string(80)
 }
 
 pub fn go_mod(project_name: &str) -> String {
