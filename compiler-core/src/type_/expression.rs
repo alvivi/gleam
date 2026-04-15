@@ -253,7 +253,10 @@ impl Implementations {
             || match target {
                 Target::Erlang => self.can_run_on_erlang,
                 Target::JavaScript => self.can_run_on_javascript,
-                Target::Go => self.can_run_on_go,
+                // M1 Go-target hack: Go aliases to JavaScript for support
+                // checks too. See TargetedDefinition::is_for in ast.rs.
+                // TODO(go-backend): remove once M7 ships a real Go stdlib.
+                Target::Go => self.can_run_on_go || self.can_run_on_javascript,
             }
     }
 }

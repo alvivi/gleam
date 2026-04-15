@@ -137,7 +137,23 @@ pub struct TargetedDefinition {
 
 impl TargetedDefinition {
     pub fn is_for(&self, target: Target) -> bool {
-        self.target.map(|t| t == target).unwrap_or(true)
+        // M1 Go-target hack: until we have a real Go stdlib, Go "aliases" to
+        // JavaScript for @target(...) filtering. This means @target(javascript)
+        // definitions are visible when building for Go, but @target(erlang)
+        // ones are not. Where the stdlib defines both (the common case), the
+        // JavaScript branch wins, which is closer to Go semantics (no BEAM
+        // bignums, strict eval). This lets `gleam build --target=go` succeed
+        // on projects that depend on gleam_stdlib.
+        //
+        // TODO(go-backend): remove this alias once we have a real Go stdlib
+        // and proper per-target codegen. At that point Go should filter
+        // definitions strictly (only @target(go) or untargeted), and stdlib
+        // functions should carry @target(go) bodies or @external(go, ...).
+        let effective_target = match target {
+            Target::Go => Target::JavaScript,
+            other => other,
+        };
+        self.target.map(|t| t == effective_target).unwrap_or(true)
     }
 }
 
