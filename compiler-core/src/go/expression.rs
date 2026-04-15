@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ecow::EcoString;
 use itertools::Itertools;
 
@@ -8,7 +6,7 @@ use crate::{
     docvec,
     line_numbers::LineNumbers,
     pretty::{Document, Documentable, line},
-    type_::Type,
+    type_::{Type, ValueConstructorVariant},
 };
 
 use super::{go_package_name, is_go_reserved_word};
@@ -139,7 +137,10 @@ impl<'a> Generator<'a> {
             TypedExpr::Int { value, .. } => self.int(value),
             TypedExpr::Float { value, .. } => self.float(value),
             TypedExpr::String { value, .. } => string_literal(value),
-            TypedExpr::Var { name, .. } => self.var(name, &expression.type_()),
+            TypedExpr::Var {
+                name, constructor, ..
+            } => self.var(name, constructor),
+            TypedExpr::Call { fun, arguments, .. } => self.call(fun, arguments),
             TypedExpr::BinOp {
                 name, left, right, ..
             } => self.bin_op(*name, left, right),
@@ -161,13 +162,44 @@ impl<'a> Generator<'a> {
         docvec!["float64(", Document::eco_string(value.into()), ")"]
     }
 
-    fn var(&self, name: &EcoString, _type_: &Arc<Type>) -> Document<'a> {
-        match name.as_str() {
-            "True" => "true".to_doc(),
-            "False" => "false".to_doc(),
-            "Nil" => "struct{}{}".to_doc(),
-            _ => Document::eco_string(go_local_name(name).into()),
+    fn var(&self, name: &EcoString, constructor: &crate::type_::ValueConstructor) -> Document<'a> {
+        match &constructor.variant {
+            ValueConstructorVariant::Record { .. } => match name.as_str() {
+                "True" => "true".to_doc(),
+                "False" => "false".to_doc(),
+                "Nil" => "struct{}{}".to_doc(),
+                _ => unimplemented!("Go codegen: custom-type constructors land in M4"),
+            },
+            ValueConstructorVariant::LocalVariable { .. } => {
+                Document::eco_string(go_local_name(name).into())
+            }
+            ValueConstructorVariant::ModuleFn { module, .. } => {
+                self.module_fn_reference(name, module)
+            }
+            ValueConstructorVariant::ModuleConstant { .. } => {
+                unimplemented!("Go codegen: module constants land in a later M2 step")
+            }
         }
+    }
+
+    fn module_fn_reference(&self, name: &EcoString, module: &EcoString) -> Document<'a> {
+        if module == &self.module.name {
+            let ident = go_identifier(name, is_exported_function(name, &self.module));
+            Document::eco_string(ident.into())
+        } else {
+            unimplemented!("Go codegen: cross-module calls land in a later milestone")
+        }
+    }
+
+    fn call(&mut self, fun: &'a TypedExpr, arguments: &'a [CallArg<TypedExpr>]) -> Document<'a> {
+        let fun_doc = self.expression(fun);
+        let args = arguments
+            .iter()
+            .map(|arg| self.expression(&arg.value))
+            .collect_vec();
+        let args_doc =
+            Document::Vec(Itertools::intersperse(args.into_iter(), ", ".to_doc()).collect());
+        docvec![fun_doc, "(", args_doc, ")"]
     }
 
     fn bin_op(&mut self, name: BinOp, left: &'a TypedExpr, right: &'a TypedExpr) -> Document<'a> {
@@ -205,6 +237,16 @@ impl<'a> Generator<'a> {
             unimplemented!("Go codegen: complex type lowering lands in later milestones")
         }
     }
+}
+
+fn is_exported_function(name: &EcoString, module: &TypedModule) -> bool {
+    module
+        .definitions
+        .functions
+        .iter()
+        .find(|f| f.name.as_ref().map(|(_, n)| n == name).unwrap_or(false))
+        .map(|f| f.publicity.is_importable())
+        .unwrap_or(false)
 }
 
 fn string_literal(value: &str) -> Document<'_> {

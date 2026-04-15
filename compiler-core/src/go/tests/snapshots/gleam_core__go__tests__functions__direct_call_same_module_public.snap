@@ -1,0 +1,25 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+expression: "\npub fn double(x: Int) -> Int {\n  x + x\n}\n\npub fn four() -> Int {\n  double(2)\n}\n"
+---
+----- SOURCE CODE
+
+pub fn double(x: Int) -> Int {
+  x + x
+}
+
+pub fn four() -> Int {
+  double(2)
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Double(x int64) int64 {
+  return (x + x)
+}
+
+func Four() int64 {
+  return Double(int64(2))
+}

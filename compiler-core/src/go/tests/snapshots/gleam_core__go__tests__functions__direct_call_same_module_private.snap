@@ -1,0 +1,25 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+expression: "\nfn helper(x: Int) -> Int {\n  x + 1\n}\n\npub fn go() -> Int {\n  helper(41)\n}\n"
+---
+----- SOURCE CODE
+
+fn helper(x: Int) -> Int {
+  x + 1
+}
+
+pub fn go() -> Int {
+  helper(41)
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func helper(x int64) int64 {
+  return (x + int64(1))
+}
+
+func Go() int64 {
+  return helper(int64(41))
+}

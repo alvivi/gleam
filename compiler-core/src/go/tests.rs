@@ -17,6 +17,7 @@ mod functions;
 mod modules;
 mod numbers;
 mod plumbing;
+mod recursion;
 mod strings;
 
 pub static CURRENT_PACKAGE: &str = "thepackage";
