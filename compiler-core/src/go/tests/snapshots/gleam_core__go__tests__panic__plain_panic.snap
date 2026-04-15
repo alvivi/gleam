@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/panic.rs
+expression: "\npub fn go() -> Int {\n  panic\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  panic
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  return (func() int64 { panic("panic expression evaluated at my/mod:3") }())
+}

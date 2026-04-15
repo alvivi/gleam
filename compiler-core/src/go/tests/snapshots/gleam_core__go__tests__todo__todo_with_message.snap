@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/todo.rs
+expression: "\npub fn go() -> Int {\n  todo as \"implement me\"\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  todo as "implement me"
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  return (func() int64 { panic("implement me") }())
+}

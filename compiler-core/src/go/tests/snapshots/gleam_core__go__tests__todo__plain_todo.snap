@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/todo.rs
+expression: "\npub fn go() -> Int {\n  todo\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  todo
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  return (func() int64 { panic("`todo` expression evaluated at my/mod:3") }())
+}

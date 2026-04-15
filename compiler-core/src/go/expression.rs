@@ -18,7 +18,6 @@ const INDENT: isize = 2;
 #[derive(Debug)]
 pub(crate) struct Generator<'a> {
     module: &'a TypedModule,
-    #[allow(dead_code)]
     line_numbers: &'a LineNumbers,
     package_name: &'a str,
     prelude_used: bool,
@@ -215,6 +214,22 @@ impl<'a> Generator<'a> {
             } => self.var(name, constructor),
             TypedExpr::Call { fun, arguments, .. } => self.call(fun, arguments),
             TypedExpr::Block { statements, .. } => self.block(statements, &expression.type_()),
+            TypedExpr::Panic {
+                location, message, ..
+            } => self.panic_or_todo(
+                "panic expression evaluated",
+                location.start,
+                message.as_deref(),
+                &expression.type_(),
+            ),
+            TypedExpr::Todo {
+                location, message, ..
+            } => self.panic_or_todo(
+                "`todo` expression evaluated",
+                location.start,
+                message.as_deref(),
+                &expression.type_(),
+            ),
             TypedExpr::BinOp {
                 name, left, right, ..
             } => self.bin_op(*name, left, right),
@@ -263,6 +278,26 @@ impl<'a> Generator<'a> {
         } else {
             unimplemented!("Go codegen: cross-module calls land in a later milestone")
         }
+    }
+
+    fn panic_or_todo(
+        &mut self,
+        default_prefix: &'static str,
+        start: u32,
+        message: Option<&'a TypedExpr>,
+        type_: &Type,
+    ) -> Document<'a> {
+        let line_no = self.line_numbers.line_number(start);
+        let message_doc = match message {
+            Some(expr) => self.expression(expr),
+            None => {
+                let default: EcoString =
+                    format!("{default_prefix} at {}:{}", self.module.name, line_no).into();
+                docvec!["\"", Document::eco_string(default), "\""]
+            }
+        };
+        let return_type = self.go_type(type_);
+        docvec!["(func() ", return_type, " { panic(", message_doc, ") }())",]
     }
 
     fn block(&mut self, statements: &'a [TypedStatement], type_: &Type) -> Document<'a> {

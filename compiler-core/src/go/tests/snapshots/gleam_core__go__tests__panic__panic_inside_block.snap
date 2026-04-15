@@ -1,0 +1,22 @@
+---
+source: compiler-core/src/go/tests/panic.rs
+expression: "\npub fn go() -> Int {\n  let x = { panic as \"fail\" }\n  x\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  let x = { panic as "fail" }
+  x
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  x := (func() int64 {
+    return (func() int64 { panic("fail") }())
+  }())
+  _ = x
+  return x
+}

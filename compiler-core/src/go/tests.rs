@@ -18,9 +18,11 @@ mod bools;
 mod functions;
 mod modules;
 mod numbers;
+mod panic;
 mod plumbing;
 mod recursion;
 mod strings;
+mod todo;
 
 pub static CURRENT_PACKAGE: &str = "thepackage";
 
