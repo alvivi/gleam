@@ -1,0 +1,19 @@
+---
+source: compiler-core/src/go/tests/assert.rs
+expression: "\npub fn go() -> Int {\n  assert True\n  1\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  assert True
+  1
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  if !(true) { panic("assertion failed at my/mod:3") }
+  return int64(1)
+}
