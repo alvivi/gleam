@@ -1,0 +1,39 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+expression: "\npub fn inc(x: Int) -> Int {\n  x + 1\n}\n\npub fn double(x: Int) -> Int {\n  x + x\n}\n\npub fn go() -> Int {\n  1 |> inc |> double\n}\n"
+---
+----- SOURCE CODE
+
+pub fn inc(x: Int) -> Int {
+  x + 1
+}
+
+pub fn double(x: Int) -> Int {
+  x + x
+}
+
+pub fn go() -> Int {
+  1 |> inc |> double
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Inc(x int64) int64 {
+  return (x + int64(1))
+}
+
+func Double(x int64) int64 {
+  return (x + x)
+}
+
+func Go() int64 {
+  return (func() int64 {
+    _pipe := int64(1)
+    _ = _pipe
+    _pipe_1 := Inc(_pipe)
+    _ = _pipe_1
+    return Double(_pipe_1)
+  }())
+}

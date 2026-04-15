@@ -101,6 +101,25 @@ pub fn go() -> Int {
 }
 
 #[test]
+fn pipeline_call() {
+    assert_go!(
+        r#"
+pub fn inc(x: Int) -> Int {
+  x + 1
+}
+
+pub fn double(x: Int) -> Int {
+  x + x
+}
+
+pub fn go() -> Int {
+  1 |> inc |> double
+}
+"#,
+    );
+}
+
+#[test]
 fn multiple_args() {
     assert_go!(
         r#"
