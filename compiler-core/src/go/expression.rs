@@ -218,6 +218,12 @@ impl<'a> Generator<'a> {
             } => self.var(name, constructor),
             TypedExpr::Call { fun, arguments, .. } => self.call(fun, arguments),
             TypedExpr::Block { statements, .. } => self.block(statements, &expression.type_()),
+            TypedExpr::Pipeline {
+                first_value,
+                assignments,
+                finally,
+                ..
+            } => self.pipeline(first_value, assignments, finally, &expression.type_()),
             TypedExpr::Panic {
                 location, message, ..
             } => self.panic_or_todo(
@@ -304,6 +310,51 @@ impl<'a> Generator<'a> {
         let line_no = self.line_numbers.line_number(start);
         let text: EcoString = format!("{prefix} at {}:{}", self.module.name, line_no).into();
         docvec!["\"", text.to_doc(), "\""]
+    }
+
+    fn pipeline(
+        &mut self,
+        first_value: &'a TypedPipelineAssignment,
+        assignments: &'a [(TypedPipelineAssignment, PipelineAssignmentKind)],
+        finally: &'a TypedExpr,
+        type_: &Type,
+    ) -> Document<'a> {
+        // Gleam's pipeline `a |> b |> c` is already desugared into a chain of
+        // assignments plus a final expression. Emit it as an IIFE so the
+        // value slots into an expression context, matching the block
+        // encoding; intermediate bindings are registered so later steps can
+        // reference them by their synthetic names.
+        let saved_names = self.local_names.clone();
+        let mut body_docs: Vec<Document<'a>> = Vec::with_capacity(assignments.len() + 2);
+        body_docs.push(self.pipeline_assignment(first_value));
+        for (assignment, _kind) in assignments {
+            body_docs.push(self.pipeline_assignment(assignment));
+        }
+        let finally_doc = self.expression(finally);
+        body_docs.push(docvec!["return ", finally_doc]);
+        self.local_names = saved_names;
+
+        docvec![
+            "(func() ",
+            self.go_type(type_),
+            " {",
+            docvec![line(), join(body_docs, line())].nest(INDENT),
+            line(),
+            "}())",
+        ]
+    }
+
+    fn pipeline_assignment(&mut self, assignment: &'a TypedPipelineAssignment) -> Document<'a> {
+        let value = self.expression(&assignment.value);
+        let mangled = self.register_local(&assignment.name);
+        docvec![
+            mangled.clone().to_doc(),
+            " := ",
+            value,
+            line(),
+            "_ = ",
+            mangled.to_doc(),
+        ]
     }
 
     fn block(&mut self, statements: &'a [TypedStatement], type_: &Type) -> Document<'a> {
