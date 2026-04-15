@@ -1,0 +1,33 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+expression: "\nfn foo() -> Int {\n  1\n}\n\nfn foo_() -> Int {\n  2\n}\n\npub fn go() -> Int {\n  foo() + foo_()\n}\n"
+---
+----- SOURCE CODE
+
+fn foo() -> Int {
+  1
+}
+
+fn foo_() -> Int {
+  2
+}
+
+pub fn go() -> Int {
+  foo() + foo_()
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func foo() int64 {
+  return int64(1)
+}
+
+func foo_() int64 {
+  return int64(2)
+}
+
+func Go() int64 {
+  return (foo() + foo_())
+}

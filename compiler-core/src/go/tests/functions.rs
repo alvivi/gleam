@@ -101,6 +101,30 @@ pub fn go() -> Int {
 }
 
 #[test]
+fn trailing_underscore_name_does_not_collide() {
+    // Gleam allows `foo_` alongside `foo` (the trailing underscore is the
+    // conventional way to escape a keyword as an identifier). Naive
+    // `snake_case` → `camelCase` folding drops the underscore and collapses
+    // both into the same Go name, which would emit two clashing `func foo`
+    // declarations.
+    assert_go!(
+        r#"
+fn foo() -> Int {
+  1
+}
+
+fn foo_() -> Int {
+  2
+}
+
+pub fn go() -> Int {
+  foo() + foo_()
+}
+"#,
+    );
+}
+
+#[test]
 fn pipeline_call() {
     assert_go!(
         r#"
