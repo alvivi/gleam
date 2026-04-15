@@ -1,0 +1,20 @@
+---
+source: compiler-core/src/go/tests/assignments.rs
+expression: "\npub fn go() -> Int {\n  let x = 1\n  2\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  let x = 1
+  2
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  x := int64(1)
+  _ = x
+  return int64(2)
+}
