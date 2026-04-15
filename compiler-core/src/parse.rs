@@ -126,18 +126,22 @@ struct Attributes {
     deprecated: Deprecation,
     external_erlang: Option<(EcoString, EcoString, SrcSpan)>,
     external_javascript: Option<(EcoString, EcoString, SrcSpan)>,
+    external_go: Option<(EcoString, EcoString, SrcSpan)>,
     internal: InternalAttribute,
 }
 
 impl Attributes {
     fn has_function_only(&self) -> bool {
-        self.external_erlang.is_some() || self.external_javascript.is_some()
+        self.external_erlang.is_some()
+            || self.external_javascript.is_some()
+            || self.external_go.is_some()
     }
 
     fn has_external_for(&self, target: Target) -> bool {
         match target {
             Target::Erlang => self.external_erlang.is_some(),
             Target::JavaScript => self.external_javascript.is_some(),
+            Target::Go => self.external_go.is_some(),
         }
     }
 
@@ -145,6 +149,7 @@ impl Attributes {
         match target {
             Target::Erlang => self.external_erlang = ext,
             Target::JavaScript => self.external_javascript = ext,
+            Target::Go => self.external_go = ext,
         }
     }
 }
@@ -2216,12 +2221,15 @@ where
             deprecation: std::mem::take(&mut attributes.deprecated),
             external_erlang: attributes.external_erlang.take(),
             external_javascript: attributes.external_javascript.take(),
+            external_go: attributes.external_go.take(),
             implementations: Implementations {
                 gleam: true,
                 can_run_on_erlang: true,
                 can_run_on_javascript: true,
+                can_run_on_go: true,
                 uses_erlang_externals: false,
                 uses_javascript_externals: false,
+                uses_go_externals: false,
             },
             purity: Purity::Pure,
         })))
@@ -2599,6 +2607,7 @@ where
             deprecation: std::mem::take(&mut attributes.deprecated),
             external_erlang: std::mem::take(&mut attributes.external_erlang),
             external_javascript: std::mem::take(&mut attributes.external_javascript),
+            external_go: std::mem::take(&mut attributes.external_go),
         })))
     }
 
@@ -3162,8 +3171,10 @@ where
                         gleam: true,
                         can_run_on_erlang: true,
                         can_run_on_javascript: true,
+                        can_run_on_go: true,
                         uses_erlang_externals: false,
                         uses_javascript_externals: false,
+                        uses_go_externals: false,
                     },
                 })))
             }
@@ -4209,6 +4220,7 @@ functions are declared separately from types.";
             match name.as_str() {
                 "javascript" => Ok(Target::JavaScript),
                 "erlang" => Ok(Target::Erlang),
+                "go" => Ok(Target::Go),
                 "js" => {
                     self.warnings
                         .push(DeprecatedSyntaxWarning::DeprecatedTargetShorthand {
@@ -4526,6 +4538,7 @@ functions are declared separately from types.";
         let target = match name.as_str() {
             "erlang" => Target::Erlang,
             "javascript" => Target::JavaScript,
+            "go" => Target::Go,
             _ => return parse_error(ParseErrorType::UnknownTarget, SrcSpan::new(start, end)),
         };
 

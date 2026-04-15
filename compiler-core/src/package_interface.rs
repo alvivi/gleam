@@ -234,6 +234,8 @@ pub struct ImplementationsInterface {
     /// - `uses_javascript_externals: true` the function is using JavaScript
     ///   external code.
     uses_javascript_externals: bool,
+    /// Set to `true` if the const/function is defined using Go external code.
+    uses_go_externals: bool,
     /// Whether the function can be called on the Erlang target, either due to a
     /// pure Gleam implementation or an implementation that uses some Erlang
     /// externals.
@@ -242,6 +244,10 @@ pub struct ImplementationsInterface {
     /// to a pure Gleam implementation or an implementation that uses some
     /// JavaScript externals.
     can_run_on_javascript: bool,
+    /// Whether the function can be called on the Go target, either due to a
+    /// pure Gleam implementation or an implementation that uses some Go
+    /// externals.
+    can_run_on_go: bool,
 }
 
 impl ImplementationsInterface {
@@ -259,17 +265,21 @@ impl ImplementationsInterface {
             gleam,
             uses_erlang_externals,
             uses_javascript_externals,
+            uses_go_externals,
 
             can_run_on_erlang,
             can_run_on_javascript,
+            can_run_on_go,
         } = implementations;
 
         ImplementationsInterface {
             gleam: *gleam,
             uses_erlang_externals: *uses_erlang_externals,
             uses_javascript_externals: *uses_javascript_externals,
+            uses_go_externals: *uses_go_externals,
             can_run_on_erlang: *can_run_on_erlang,
             can_run_on_javascript: *can_run_on_javascript,
+            can_run_on_go: *can_run_on_go,
         }
     }
 }

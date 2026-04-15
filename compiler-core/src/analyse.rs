@@ -447,6 +447,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
             has_body: true,
             has_erlang_external: false,
             has_javascript_external: false,
+            has_go_external: false,
         };
         let mut expr_typer = ExprTyper::new(environment, definition, &mut self.problems);
         let typed_expr = expr_typer.infer_const(&annotation, *value);
@@ -540,6 +541,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
             deprecation,
             external_erlang,
             external_javascript,
+            external_go,
             return_type: (),
             implementations: _,
             purity: _,
@@ -564,14 +566,19 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
         self.assert_valid_javascript_external(&name, external_javascript.as_ref(), location);
 
         // Find the external implementation for the current target, if one has been given.
-        let external =
-            target_function_implementation(target, &external_erlang, &external_javascript);
+        let external = target_function_implementation(
+            target,
+            &external_erlang,
+            &external_javascript,
+            &external_go,
+        );
 
         // The function must have at least one implementation somewhere.
         let has_implementation = self.ensure_function_has_an_implementation(
             &body,
             &external_erlang,
             &external_javascript,
+            &external_go,
             location,
         );
 
@@ -588,6 +595,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
             has_body,
             has_erlang_external: external_erlang.is_some(),
             has_javascript_external: external_javascript.is_some(),
+            has_go_external: external_go.is_some(),
         };
 
         // We have already registered the function in the `register_value_from_function`
@@ -781,6 +789,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
             external_javascript: external_javascript
                 .as_ref()
                 .map(|(m, f, _)| (m.clone(), f.clone())),
+            external_go: external_go.as_ref().map(|(m, f, _)| (m.clone(), f.clone())),
             field_map,
             module: environment.current_module.clone(),
             arity: typed_arguments.len(),
@@ -821,6 +830,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
             body,
             external_erlang,
             external_javascript,
+            external_go,
             implementations,
             purity,
         };
@@ -901,10 +911,11 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
         body: &[UntypedStatement],
         external_erlang: &Option<(EcoString, EcoString, SrcSpan)>,
         external_javascript: &Option<(EcoString, EcoString, SrcSpan)>,
+        external_go: &Option<(EcoString, EcoString, SrcSpan)>,
         location: SrcSpan,
     ) -> bool {
-        match (external_erlang, external_javascript) {
-            (None, None) if body.is_empty() => {
+        match (external_erlang, external_javascript, external_go) {
+            (None, None, None) if body.is_empty() => {
                 self.problems.error(Error::NoImplementation { location });
                 false
             }
@@ -1000,6 +1011,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
             deprecation,
             external_erlang,
             external_javascript,
+            external_go,
             ..
         } = t;
 
@@ -1109,7 +1121,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
                 });
         }
 
-        if external_erlang.is_some() || external_javascript.is_some() {
+        if external_erlang.is_some() || external_javascript.is_some() || external_go.is_some() {
             self.track_feature_usage(FeatureKind::ExternalCustomType, location);
 
             if !constructors.is_empty() {
@@ -1132,6 +1144,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
             deprecation,
             external_erlang,
             external_javascript,
+            external_go,
         })
     }
 
@@ -1579,6 +1592,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
             documentation,
             external_erlang,
             external_javascript,
+            external_go,
             deprecation,
             end_position: _,
             body: _,
@@ -1616,7 +1630,9 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
 
         // When external implementations are present then the type annotations
         // must be given in full, so we disallow holes in the annotations.
-        hydrator.permit_holes(external_erlang.is_none() && external_javascript.is_none());
+        hydrator.permit_holes(
+            external_erlang.is_none() && external_javascript.is_none() && external_go.is_none(),
+        );
 
         let arguments_types = arguments
             .iter()
@@ -1658,6 +1674,7 @@ impl<'a, A> ModuleAnalyzer<'a, A> {
             external_javascript: external_javascript
                 .as_ref()
                 .map(|(m, f, _)| (m.clone(), f.clone())),
+            external_go: external_go.as_ref().map(|(m, f, _)| (m.clone(), f.clone())),
             module: environment.current_module.clone(),
             arity: arguments.len(),
             location: *location,
@@ -1757,10 +1774,12 @@ fn target_function_implementation<'a>(
     target: Target,
     external_erlang: &'a Option<(EcoString, EcoString, SrcSpan)>,
     external_javascript: &'a Option<(EcoString, EcoString, SrcSpan)>,
+    external_go: &'a Option<(EcoString, EcoString, SrcSpan)>,
 ) -> &'a Option<(EcoString, EcoString, SrcSpan)> {
     match target {
         Target::Erlang => external_erlang,
         Target::JavaScript => external_javascript,
+        Target::Go => external_go,
     }
 }
 
@@ -1925,6 +1944,7 @@ fn generalise_function(
         return_type,
         external_erlang,
         external_javascript,
+        external_go,
         implementations,
         purity,
     } = function;
@@ -1951,6 +1971,7 @@ fn generalise_function(
         external_javascript: external_javascript
             .as_ref()
             .map(|(m, f, _)| (m.clone(), f.clone())),
+        external_go: external_go.as_ref().map(|(m, f, _)| (m.clone(), f.clone())),
         module: module_name.clone(),
         arity: arguments.len(),
         location,
@@ -1988,6 +2009,7 @@ fn generalise_function(
         body,
         external_erlang,
         external_javascript,
+        external_go,
         implementations,
         purity,
     }

@@ -4,7 +4,7 @@ use crate::{
         ErlangAppCodegenConfiguration, Module, module_erlang_name, package_compiler::StdlibPackage,
     },
     config::PackageConfig,
-    erlang,
+    erlang, go,
     io::FileSystemWriter,
     javascript::{self, ModuleConfig},
     line_numbers::LineNumbers,
@@ -293,5 +293,49 @@ impl<'a> JavaScript<'a> {
             writer.write(&source_map_path, &content)?;
         }
         Ok(())
+    }
+}
+
+/// A code generator that creates a .go file for each Gleam module in the
+/// package and a single `go.mod` at the project root.
+#[derive(Debug)]
+pub struct Go<'a> {
+    output_directory: &'a Utf8Path,
+    project_name: &'a str,
+}
+
+impl<'a> Go<'a> {
+    pub fn new(output_directory: &'a Utf8Path, project_name: &'a str) -> Self {
+        Self {
+            output_directory,
+            project_name,
+        }
+    }
+
+    pub fn render(&self, writer: &impl FileSystemWriter, modules: &[Module]) -> Result<()> {
+        for module in modules {
+            self.go_module(writer, module)?;
+        }
+        self.write_go_mod(writer)?;
+        Ok(())
+    }
+
+    fn go_module(&self, writer: &impl FileSystemWriter, module: &Module) -> Result<()> {
+        let name = format!("{}.go", module.name);
+        let path = self.output_directory.join(name);
+        let output = go::module(&module.ast, self.project_name);
+        tracing::debug!(name = ?module.name, "Generated Go module");
+        writer.write(&path, &output)
+    }
+
+    fn write_go_mod(&self, writer: &impl FileSystemWriter) -> Result<()> {
+        let path = self.output_directory.join("go.mod");
+        // Skip rewriting an existing go.mod to avoid confusing file watchers
+        // and HMR tools; mirrors `JavaScript::write_prelude`.
+        if writer.exists(&path) {
+            return Ok(());
+        }
+        let content = go::go_mod(self.project_name);
+        writer.write(&path, &content)
     }
 }

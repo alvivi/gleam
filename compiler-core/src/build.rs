@@ -68,6 +68,7 @@ pub enum Target {
     #[serde(alias = "js")]
     #[clap(alias = "js")]
     JavaScript,
+    Go,
 }
 
 impl Target {
@@ -75,6 +76,7 @@ impl Target {
         match self {
             Target::Erlang => "Erlang",
             Target::JavaScript => "JavaScript",
+            Target::Go => "Go",
         }
     }
 
@@ -180,6 +182,7 @@ pub enum TargetCodegenConfiguration {
     Erlang {
         app_file: Option<ErlangAppCodegenConfiguration>,
     },
+    Go,
 }
 
 impl TargetCodegenConfiguration {
@@ -187,6 +190,7 @@ impl TargetCodegenConfiguration {
         match self {
             Self::JavaScript { .. } => Target::JavaScript,
             Self::Erlang { .. } => Target::Erlang,
+            Self::Go => Target::Go,
         }
     }
 }

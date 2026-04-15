@@ -45,6 +45,7 @@ Parsed {
                         typed_parameters: [],
                         external_erlang: None,
                         external_javascript: None,
+                        external_go: None,
                     },
                 ),
                 target: None,
