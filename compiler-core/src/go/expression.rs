@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 
 use ecow::EcoString;
-use itertools::Itertools;
 
 use crate::{
     ast::*,
     docvec,
     line_numbers::LineNumbers,
-    pretty::{Document, Documentable, line},
-    type_::{Type, ValueConstructorVariant},
+    pretty::{Document, Documentable, join, line, nil},
+    type_::{Type, ValueConstructor, ValueConstructorVariant},
 };
 
 use super::{go_package_name, is_go_reserved_word};
@@ -22,11 +21,12 @@ pub(crate) struct Generator<'a> {
     package_name: &'a str,
     prelude_used: bool,
     /// Tracks how many times a given Gleam name has been bound in the current
-    /// function, so that shadowing produces distinct Go identifiers. The
-    /// stored count is the next suffix counter to use.
+    /// function, so that shadowing produces distinct Go identifiers. Persists
+    /// across block scope restores — a rebind *after* a block must still get
+    /// a fresh suffix rather than recycling one the block already used.
     local_counts: HashMap<EcoString, usize>,
-    /// The Go identifier currently in scope for each Gleam local name. Queried
-    /// whenever we emit a reference to a `LocalVariable`.
+    /// The Go identifier currently in scope for each Gleam local name.
+    /// Saved and restored around block expressions.
     local_names: HashMap<EcoString, EcoString>,
 }
 
@@ -47,10 +47,8 @@ impl<'a> Generator<'a> {
     }
 
     pub fn compile(&mut self) -> Document<'a> {
-        let package_decl = docvec![
-            "package ",
-            Document::eco_string(go_package_name(self.package_name).into()),
-        ];
+        let package: EcoString = go_package_name(self.package_name).into();
+        let package_decl = docvec!["package ", package.to_doc()];
 
         let functions = self
             .module
@@ -59,31 +57,24 @@ impl<'a> Generator<'a> {
             .iter()
             .filter(|f| f.external_go.is_none())
             .map(|f| self.function(f))
-            .collect_vec();
+            .collect::<Vec<_>>();
 
         let imports = if self.prelude_used {
-            let path = format!("gleam/{}/prelude", self.package_name);
-            docvec![
-                line(),
-                "import prelude \"",
-                Document::eco_string(path.into()),
-                "\"",
-                line(),
-            ]
+            let path: EcoString = format!("gleam/{}/prelude", self.package_name).into();
+            docvec![line(), "import prelude \"", path.to_doc(), "\"", line()]
         } else {
-            Document::Vec(vec![])
+            nil()
         };
 
         if functions.is_empty() {
             docvec![package_decl, line(), imports]
         } else {
-            let separated = Itertools::intersperse(functions.into_iter(), line()).collect();
             docvec![
                 package_decl,
                 line(),
                 imports,
                 line(),
-                Document::Vec(separated)
+                join(functions, line())
             ]
         }
     }
@@ -94,34 +85,24 @@ impl<'a> Generator<'a> {
 
         let name = match &f.name {
             Some((_, n)) => go_identifier(n, f.publicity.is_importable()),
-            None => "anonymous".to_string(),
+            None => "anonymous".into(),
         };
 
-        let params = f
-            .arguments
-            .iter()
-            .map(|arg| {
-                let param_name = match arg.names.get_variable_name() {
-                    Some(n) => self.register_local(n),
-                    None => "_".into(),
-                };
-                docvec![
-                    Document::eco_string(param_name),
-                    " ",
-                    self.go_type(&arg.type_),
-                ]
-            })
-            .collect_vec();
+        let params = f.arguments.iter().map(|arg| {
+            let param_name = match arg.names.get_variable_name() {
+                Some(n) => self.register_local(n),
+                None => "_".into(),
+            };
+            docvec![param_name.to_doc(), " ", self.go_type(&arg.type_)]
+        });
 
-        let params_doc =
-            Document::Vec(Itertools::intersperse(params.into_iter(), ", ".to_doc()).collect());
+        let params_doc = join(params, ", ".to_doc());
         let return_type = self.go_type(&f.return_type);
-
-        let body = self.function_body(&f.body, &f.return_type);
+        let body = self.function_body(&f.body);
 
         docvec![
             "func ",
-            Document::eco_string(name.into()),
+            name.to_doc(),
             "(",
             params_doc,
             ") ",
@@ -134,14 +115,13 @@ impl<'a> Generator<'a> {
         ]
     }
 
-    fn function_body(&mut self, body: &'a [TypedStatement], _return_type: &Type) -> Document<'a> {
+    fn function_body(&mut self, body: &'a [TypedStatement]) -> Document<'a> {
         let last_idx = body.len().saturating_sub(1);
-        let mut statements = Vec::with_capacity(body.len());
-        for (i, stmt) in body.iter().enumerate() {
-            let is_last = i == last_idx;
-            statements.push(self.statement(stmt, is_last));
-        }
-        Document::Vec(Itertools::intersperse(statements.into_iter(), line()).collect())
+        let statements = body
+            .iter()
+            .enumerate()
+            .map(|(i, stmt)| self.statement(stmt, i == last_idx));
+        join(statements, line())
     }
 
     fn statement(&mut self, statement: &'a TypedStatement, is_last: bool) -> Document<'a> {
@@ -156,7 +136,7 @@ impl<'a> Generator<'a> {
             }
             Statement::Assignment(assignment) => self.assignment(assignment),
             Statement::Assert(assert) => self.assert(assert),
-            Statement::Use(_) => unimplemented!("Go codegen: `use` lands in M3"),
+            Statement::Use(_) => unimplemented!("Go codegen: `use` not yet supported"),
         }
     }
 
@@ -164,14 +144,9 @@ impl<'a> Generator<'a> {
         let condition = self.expression(&assert.value);
         let message_doc = match &assert.message {
             Some(expr) => self.expression(expr),
-            None => {
-                let line_no = self.line_numbers.line_number(assert.location.start);
-                let default: EcoString =
-                    format!("assertion failed at {}:{}", self.module.name, line_no).into();
-                docvec!["\"", Document::eco_string(default), "\""]
-            }
+            None => self.default_message("assertion failed", assert.location.start),
         };
-        docvec!["if !(", condition, ") { panic(", message_doc, ") }",]
+        docvec!["if !(", condition, ") { panic(", message_doc, ") }"]
     }
 
     fn assignment(&mut self, assignment: &'a TypedAssignment) -> Document<'a> {
@@ -181,20 +156,17 @@ impl<'a> Generator<'a> {
                 let mangled = self.register_local(name);
                 // `_ = name` keeps Go's unused-variable rule happy even when
                 // Gleam never references the binding.
-                let mangled_doc = Document::eco_string(mangled);
                 docvec![
-                    mangled_doc.clone(),
+                    mangled.clone().to_doc(),
                     " := ",
                     value,
                     line(),
                     "_ = ",
-                    mangled_doc,
+                    mangled.to_doc(),
                 ]
             }
             Pattern::Discard { .. } => docvec!["_ = ", value],
-            _ => unimplemented!(
-                "Go codegen: non-variable let patterns (tuple/constructor destructuring) land in later milestones"
-            ),
+            _ => unimplemented!("Go codegen: destructuring let patterns not yet supported"),
         }
     }
 
@@ -219,8 +191,8 @@ impl<'a> Generator<'a> {
 
     fn expression(&mut self, expression: &'a TypedExpr) -> Document<'a> {
         match expression {
-            TypedExpr::Int { value, .. } => self.int(value),
-            TypedExpr::Float { value, .. } => self.float(value),
+            TypedExpr::Int { value, .. } => numeric_literal("int64", value),
+            TypedExpr::Float { value, .. } => numeric_literal("float64", value),
             TypedExpr::String { value, .. } => string_literal(value),
             TypedExpr::Var {
                 name, constructor, ..
@@ -246,51 +218,47 @@ impl<'a> Generator<'a> {
             TypedExpr::BinOp {
                 name, left, right, ..
             } => self.bin_op(*name, left, right),
-            TypedExpr::NegateBool { value, .. } => {
-                docvec!["!", self.expression(value)]
-            }
-            TypedExpr::NegateInt { value, .. } => {
-                docvec!["-", self.expression(value)]
-            }
-            _ => unimplemented!("Go codegen: expression kind lands in a later M2 step"),
+            TypedExpr::NegateBool { value, .. } => docvec!["!", self.expression(value)],
+            TypedExpr::NegateInt { value, .. } => docvec!["-", self.expression(value)],
+            _ => unimplemented!("Go codegen: expression kind not yet supported"),
         }
     }
 
-    fn int(&self, value: &str) -> Document<'a> {
-        docvec!["int64(", Document::eco_string(value.into()), ")"]
-    }
-
-    fn float(&self, value: &str) -> Document<'a> {
-        docvec!["float64(", Document::eco_string(value.into()), ")"]
-    }
-
-    fn var(&self, name: &EcoString, constructor: &crate::type_::ValueConstructor) -> Document<'a> {
+    fn var(&self, name: &EcoString, constructor: &ValueConstructor) -> Document<'a> {
         match &constructor.variant {
             ValueConstructorVariant::Record { .. } => match name.as_str() {
                 "True" => "true".to_doc(),
                 "False" => "false".to_doc(),
                 "Nil" => "struct{}{}".to_doc(),
-                _ => unimplemented!("Go codegen: custom-type constructors land in M4"),
+                _ => unimplemented!("Go codegen: custom-type constructors not yet supported"),
             },
-            ValueConstructorVariant::LocalVariable { .. } => {
-                Document::eco_string(self.lookup_local(name))
-            }
+            ValueConstructorVariant::LocalVariable { .. } => self.lookup_local(name).to_doc(),
             ValueConstructorVariant::ModuleFn { module, .. } => {
-                self.module_fn_reference(name, module)
+                self.module_fn_reference(name, module, constructor.publicity.is_importable())
             }
             ValueConstructorVariant::ModuleConstant { .. } => {
-                unimplemented!("Go codegen: module constants land in a later M2 step")
+                unimplemented!("Go codegen: module constants not yet supported")
             }
         }
     }
 
-    fn module_fn_reference(&self, name: &EcoString, module: &EcoString) -> Document<'a> {
+    fn module_fn_reference(
+        &self,
+        name: &EcoString,
+        module: &EcoString,
+        public: bool,
+    ) -> Document<'a> {
         if module == &self.module.name {
-            let ident = go_identifier(name, is_exported_function(name, &self.module));
-            Document::eco_string(ident.into())
+            go_identifier(name, public).to_doc()
         } else {
-            unimplemented!("Go codegen: cross-module calls land in a later milestone")
+            unimplemented!("Go codegen: cross-module references not yet supported")
         }
+    }
+
+    fn call(&mut self, fun: &'a TypedExpr, arguments: &'a [CallArg<TypedExpr>]) -> Document<'a> {
+        let fun_doc = self.expression(fun);
+        let args = arguments.iter().map(|arg| self.expression(&arg.value));
+        docvec![fun_doc, "(", join(args, ", ".to_doc()), ")"]
     }
 
     fn panic_or_todo(
@@ -300,56 +268,47 @@ impl<'a> Generator<'a> {
         message: Option<&'a TypedExpr>,
         type_: &Type,
     ) -> Document<'a> {
-        let line_no = self.line_numbers.line_number(start);
         let message_doc = match message {
             Some(expr) => self.expression(expr),
-            None => {
-                let default: EcoString =
-                    format!("{default_prefix} at {}:{}", self.module.name, line_no).into();
-                docvec!["\"", Document::eco_string(default), "\""]
-            }
+            None => self.default_message(default_prefix, start),
         };
-        let return_type = self.go_type(type_);
-        docvec!["(func() ", return_type, " { panic(", message_doc, ") }())",]
-    }
-
-    fn block(&mut self, statements: &'a [TypedStatement], type_: &Type) -> Document<'a> {
-        // Gleam blocks are expressions returning the last statement's value;
-        // Go blocks are not. Wrap in an IIFE so the block's value slots back
-        // into the surrounding expression context. Statement lifting is the
-        // cleaner long-term fix but requires a statement accumulator thread
-        // through every expression site — deferred until M3 when `case`
-        // forces the refactor.
-        let saved_names = self.local_names.clone();
-        let last_idx = statements.len().saturating_sub(1);
-        let body_docs = statements
-            .iter()
-            .enumerate()
-            .map(|(i, stmt)| self.statement(stmt, i == last_idx))
-            .collect_vec();
-        self.local_names = saved_names;
-
-        let body = Document::Vec(Itertools::intersperse(body_docs.into_iter(), line()).collect());
-        let return_type = self.go_type(type_);
         docvec![
             "(func() ",
-            return_type,
-            " {",
-            docvec![line(), body].nest(INDENT),
-            line(),
-            "}())",
+            self.go_type(type_),
+            " { panic(",
+            message_doc,
+            ") }())",
         ]
     }
 
-    fn call(&mut self, fun: &'a TypedExpr, arguments: &'a [CallArg<TypedExpr>]) -> Document<'a> {
-        let fun_doc = self.expression(fun);
-        let args = arguments
+    fn default_message(&self, prefix: &str, start: u32) -> Document<'a> {
+        let line_no = self.line_numbers.line_number(start);
+        let text: EcoString = format!("{prefix} at {}:{}", self.module.name, line_no).into();
+        docvec!["\"", text.to_doc(), "\""]
+    }
+
+    fn block(&mut self, statements: &'a [TypedStatement], type_: &Type) -> Document<'a> {
+        // Gleam blocks are expressions; Go blocks are statements. Wrap in an
+        // IIFE so the block's value slots into the surrounding expression
+        // context. Statement lifting is the cleaner encoding but requires a
+        // statement accumulator threaded through every expression site.
+        let saved_names = self.local_names.clone();
+        let last_idx = statements.len().saturating_sub(1);
+        let body_docs: Vec<_> = statements
             .iter()
-            .map(|arg| self.expression(&arg.value))
-            .collect_vec();
-        let args_doc =
-            Document::Vec(Itertools::intersperse(args.into_iter(), ", ".to_doc()).collect());
-        docvec![fun_doc, "(", args_doc, ")"]
+            .enumerate()
+            .map(|(i, stmt)| self.statement(stmt, i == last_idx))
+            .collect();
+        self.local_names = saved_names;
+
+        docvec![
+            "(func() ",
+            self.go_type(type_),
+            " {",
+            docvec![line(), join(body_docs, line())].nest(INDENT),
+            line(),
+            "}())",
+        ]
     }
 
     fn bin_op(&mut self, name: BinOp, left: &'a TypedExpr, right: &'a TypedExpr) -> Document<'a> {
@@ -373,7 +332,7 @@ impl<'a> Generator<'a> {
                     BinOp::Concatenate => " + ".to_doc(),
                     BinOp::DivInt | BinOp::DivFloat | BinOp::RemainderInt => unreachable!(),
                 };
-                docvec!["(", self.expression(left), op, self.expression(right), ")",]
+                docvec!["(", self.expression(left), op, self.expression(right), ")"]
             }
         }
     }
@@ -408,36 +367,31 @@ impl<'a> Generator<'a> {
         } else if type_.is_nil() {
             "struct{}".to_doc()
         } else {
-            unimplemented!("Go codegen: complex type lowering lands in later milestones")
+            unimplemented!("Go codegen: complex types not yet supported")
         }
     }
 }
 
-fn is_exported_function(name: &EcoString, module: &TypedModule) -> bool {
-    module
-        .definitions
-        .functions
-        .iter()
-        .find(|f| f.name.as_ref().map(|(_, n)| n == name).unwrap_or(false))
-        .map(|f| f.publicity.is_importable())
-        .unwrap_or(false)
+fn numeric_literal<'a>(type_name: &'static str, value: &str) -> Document<'a> {
+    let literal: EcoString = value.into();
+    docvec![type_name, "(", literal.to_doc(), ")"]
 }
 
-fn string_literal(value: &str) -> Document<'_> {
-    // Gleam stores string literals with escape sequences (`\n`, `\t`, `\"`,
-    // `\\`) preserved as source text. Go's string-literal syntax is a
-    // superset for those cases so they can be emitted verbatim. Literal
-    // newlines can appear in multi-line strings and must be re-escaped.
-    // `\u{NNNN}` needs rewriting to Go's `\uNNNN`, handled in a later M2 step.
+fn string_literal<'a>(value: &str) -> Document<'a> {
+    // Gleam stores string literals with escape sequences preserved as source
+    // text; Go's string-literal syntax is a superset for those cases so they
+    // can be emitted verbatim. Literal newlines in multi-line strings still
+    // need re-escaping. Gleam's `\u{NNNN}` escape differs from Go's `\uNNNN`
+    // and is not yet rewritten.
     let body: EcoString = if value.contains('\n') {
         value.replace('\n', r"\n").into()
     } else {
         value.into()
     };
-    docvec!["\"", Document::eco_string(body), "\""]
+    docvec!["\"", body.to_doc(), "\""]
 }
 
-fn go_identifier(name: &str, public: bool) -> String {
+fn go_identifier(name: &str, public: bool) -> EcoString {
     let mut out = String::with_capacity(name.len());
     let mut capitalise = public;
     for ch in name.chars() {
@@ -458,14 +412,14 @@ fn go_identifier(name: &str, public: bool) -> String {
     if is_go_reserved_word(&out) || is_go_predeclared_identifier(&out) {
         out.push('_');
     }
-    out
+    out.into()
 }
 
-fn go_local_name(name: &str) -> String {
+fn go_local_name(name: &str) -> EcoString {
     if is_go_reserved_word(name) || is_go_predeclared_identifier(name) {
-        format!("{name}_")
+        format!("{name}_").into()
     } else {
-        name.to_string()
+        name.into()
     }
 }
 
