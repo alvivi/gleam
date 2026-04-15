@@ -13,6 +13,7 @@ use camino::Utf8PathBuf;
 use std::collections::HashMap;
 
 mod assignments;
+mod blocks;
 mod bools;
 mod functions;
 mod modules;
