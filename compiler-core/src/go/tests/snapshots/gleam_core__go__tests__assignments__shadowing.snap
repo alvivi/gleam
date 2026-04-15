@@ -1,0 +1,26 @@
+---
+source: compiler-core/src/go/tests/assignments.rs
+expression: "\npub fn go() -> Int {\n  let x = 1\n  let x = x + 10\n  let x = x + 100\n  x\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  let x = 1
+  let x = x + 10
+  let x = x + 100
+  x
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  x := int64(1)
+  _ = x
+  x_1 := (x + int64(10))
+  _ = x_1
+  x_2 := (x_1 + int64(100))
+  _ = x_2
+  return x_2
+}

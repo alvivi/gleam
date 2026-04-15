@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use ecow::EcoString;
 use itertools::Itertools;
 
@@ -20,6 +22,13 @@ pub(crate) struct Generator<'a> {
     line_numbers: &'a LineNumbers,
     package_name: &'a str,
     prelude_used: bool,
+    /// Tracks how many times a given Gleam name has been bound in the current
+    /// function, so that shadowing produces distinct Go identifiers. The
+    /// stored count is the next suffix counter to use.
+    local_counts: HashMap<EcoString, usize>,
+    /// The Go identifier currently in scope for each Gleam local name. Queried
+    /// whenever we emit a reference to a `LocalVariable`.
+    local_names: HashMap<EcoString, EcoString>,
 }
 
 impl<'a> Generator<'a> {
@@ -33,6 +42,8 @@ impl<'a> Generator<'a> {
             line_numbers,
             package_name,
             prelude_used: false,
+            local_counts: HashMap::new(),
+            local_names: HashMap::new(),
         }
     }
 
@@ -79,6 +90,9 @@ impl<'a> Generator<'a> {
     }
 
     fn function(&mut self, f: &'a TypedFunction) -> Document<'a> {
+        self.local_counts.clear();
+        self.local_names.clear();
+
         let name = match &f.name {
             Some((_, n)) => go_identifier(n, f.publicity.is_importable()),
             None => "anonymous".to_string(),
@@ -88,13 +102,12 @@ impl<'a> Generator<'a> {
             .arguments
             .iter()
             .map(|arg| {
-                let name = arg
-                    .names
-                    .get_variable_name()
-                    .map(|n| go_local_name(n))
-                    .unwrap_or_else(|| "_".to_string());
+                let param_name = match arg.names.get_variable_name() {
+                    Some(n) => self.register_local(n),
+                    None => "_".into(),
+                };
                 docvec![
-                    Document::eco_string(name.into()),
+                    Document::eco_string(param_name),
                     " ",
                     self.go_type(&arg.type_),
                 ]
@@ -122,22 +135,17 @@ impl<'a> Generator<'a> {
         ]
     }
 
-    fn function_body(&mut self, body: &'a [TypedStatement], return_type: &Type) -> Document<'a> {
-        let mut statements = Vec::with_capacity(body.len());
+    fn function_body(&mut self, body: &'a [TypedStatement], _return_type: &Type) -> Document<'a> {
         let last_idx = body.len().saturating_sub(1);
+        let mut statements = Vec::with_capacity(body.len());
         for (i, stmt) in body.iter().enumerate() {
             let is_last = i == last_idx;
-            statements.push(self.statement(stmt, is_last, return_type));
+            statements.push(self.statement(stmt, is_last));
         }
         Document::Vec(Itertools::intersperse(statements.into_iter(), line()).collect())
     }
 
-    fn statement(
-        &mut self,
-        statement: &'a TypedStatement,
-        is_last: bool,
-        _return_type: &Type,
-    ) -> Document<'a> {
+    fn statement(&mut self, statement: &'a TypedStatement, is_last: bool) -> Document<'a> {
         match statement {
             Statement::Expression(expr) => {
                 let doc = self.expression(expr);
@@ -147,10 +155,54 @@ impl<'a> Generator<'a> {
                     docvec!["_ = ", doc]
                 }
             }
-            Statement::Assignment(_) | Statement::Use(_) | Statement::Assert(_) => {
-                unimplemented!("Go codegen: non-expression statements land in a later M2 step")
+            Statement::Assignment(assignment) => self.assignment(assignment),
+            Statement::Use(_) | Statement::Assert(_) => {
+                unimplemented!("Go codegen: `use` and `assert` land in a later M2 step")
             }
         }
+    }
+
+    fn assignment(&mut self, assignment: &'a TypedAssignment) -> Document<'a> {
+        let value = self.expression(&assignment.value);
+        match &assignment.pattern {
+            Pattern::Variable { name, .. } => {
+                let mangled = self.register_local(name);
+                // `_ = name` keeps Go's unused-variable rule happy even when
+                // Gleam never references the binding.
+                let mangled_doc = Document::eco_string(mangled);
+                docvec![
+                    mangled_doc.clone(),
+                    " := ",
+                    value,
+                    line(),
+                    "_ = ",
+                    mangled_doc,
+                ]
+            }
+            Pattern::Discard { .. } => docvec!["_ = ", value],
+            _ => unimplemented!(
+                "Go codegen: non-variable let patterns (tuple/constructor destructuring) land in later milestones"
+            ),
+        }
+    }
+
+    fn register_local(&mut self, name: &EcoString) -> EcoString {
+        let counter = self.local_counts.entry(name.clone()).or_insert(0);
+        let mangled: EcoString = if *counter == 0 {
+            go_local_name(name).into()
+        } else {
+            format!("{name}_{counter}").into()
+        };
+        *counter += 1;
+        let _ = self.local_names.insert(name.clone(), mangled.clone());
+        mangled
+    }
+
+    fn lookup_local(&self, name: &EcoString) -> EcoString {
+        self.local_names
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| go_local_name(name).into())
     }
 
     fn expression(&mut self, expression: &'a TypedExpr) -> Document<'a> {
@@ -192,7 +244,7 @@ impl<'a> Generator<'a> {
                 _ => unimplemented!("Go codegen: custom-type constructors land in M4"),
             },
             ValueConstructorVariant::LocalVariable { .. } => {
-                Document::eco_string(go_local_name(name).into())
+                Document::eco_string(self.lookup_local(name))
             }
             ValueConstructorVariant::ModuleFn { module, .. } => {
                 self.module_fn_reference(name, module)

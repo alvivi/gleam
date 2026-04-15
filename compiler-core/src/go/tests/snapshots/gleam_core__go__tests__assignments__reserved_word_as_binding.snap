@@ -1,0 +1,20 @@
+---
+source: compiler-core/src/go/tests/assignments.rs
+expression: "\npub fn go() -> Int {\n  let type_ = 1\n  type_\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  let type_ = 1
+  type_
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  type_ := int64(1)
+  _ = type_
+  return type_
+}
