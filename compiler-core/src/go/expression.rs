@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ecow::EcoString;
 
@@ -28,6 +28,10 @@ pub(crate) struct Generator<'a> {
     /// The Go identifier currently in scope for each Gleam local name.
     /// Saved and restored around block expressions.
     local_names: HashMap<EcoString, EcoString>,
+    /// Every Go identifier already handed out in the current function. Used
+    /// to skip counter values that would collide with a user-written binding
+    /// like `let x_1 = 1` when a later `let x` is shadowed into `x_1`.
+    used_go_names: HashSet<EcoString>,
 }
 
 impl<'a> Generator<'a> {
@@ -43,6 +47,7 @@ impl<'a> Generator<'a> {
             prelude_used: false,
             local_counts: HashMap::new(),
             local_names: HashMap::new(),
+            used_go_names: HashSet::new(),
         }
     }
 
@@ -82,6 +87,7 @@ impl<'a> Generator<'a> {
     fn function(&mut self, f: &'a TypedFunction) -> Document<'a> {
         self.local_counts.clear();
         self.local_names.clear();
+        self.used_go_names.clear();
 
         let name = match &f.name {
             Some((_, n)) => go_identifier(n, f.publicity.is_importable()),
@@ -178,13 +184,19 @@ impl<'a> Generator<'a> {
     }
 
     fn register_local(&mut self, name: &EcoString) -> EcoString {
-        let counter = self.local_counts.entry(name.clone()).or_insert(0);
-        let mangled: EcoString = if *counter == 0 {
-            go_local_name(name).into()
-        } else {
-            format!("{name}_{counter}").into()
+        let mangled = loop {
+            let counter = self.local_counts.entry(name.clone()).or_insert(0);
+            let candidate: EcoString = if *counter == 0 {
+                go_local_name(name).into()
+            } else {
+                format!("{name}_{counter}").into()
+            };
+            *counter += 1;
+            if !self.used_go_names.contains(&candidate) {
+                break candidate;
+            }
         };
-        *counter += 1;
+        let _ = self.used_go_names.insert(mangled.clone());
         let _ = self.local_names.insert(name.clone(), mangled.clone());
         mangled
     }

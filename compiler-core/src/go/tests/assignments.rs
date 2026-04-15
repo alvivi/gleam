@@ -76,6 +76,20 @@ pub fn go() -> Int {
 }
 
 #[test]
+fn mangled_suffix_does_not_collide_with_user_binding() {
+    assert_go!(
+        r#"
+pub fn go() -> Int {
+  let x_1 = 1
+  let x = 2
+  let x = 3
+  x + x_1
+}
+"#,
+    );
+}
+
+#[test]
 fn reserved_word_as_binding() {
     assert_go!(
         r#"
