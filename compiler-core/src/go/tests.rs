@@ -12,6 +12,7 @@ use crate::{
 use camino::Utf8PathBuf;
 use std::collections::HashMap;
 
+mod assert;
 mod assignments;
 mod blocks;
 mod bools;

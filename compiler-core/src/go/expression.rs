@@ -155,10 +155,23 @@ impl<'a> Generator<'a> {
                 }
             }
             Statement::Assignment(assignment) => self.assignment(assignment),
-            Statement::Use(_) | Statement::Assert(_) => {
-                unimplemented!("Go codegen: `use` and `assert` land in a later M2 step")
-            }
+            Statement::Assert(assert) => self.assert(assert),
+            Statement::Use(_) => unimplemented!("Go codegen: `use` lands in M3"),
         }
+    }
+
+    fn assert(&mut self, assert: &'a TypedAssert) -> Document<'a> {
+        let condition = self.expression(&assert.value);
+        let message_doc = match &assert.message {
+            Some(expr) => self.expression(expr),
+            None => {
+                let line_no = self.line_numbers.line_number(assert.location.start);
+                let default: EcoString =
+                    format!("assertion failed at {}:{}", self.module.name, line_no).into();
+                docvec!["\"", Document::eco_string(default), "\""]
+            }
+        };
+        docvec!["if !(", condition, ") { panic(", message_doc, ") }",]
     }
 
     fn assignment(&mut self, assignment: &'a TypedAssignment) -> Document<'a> {

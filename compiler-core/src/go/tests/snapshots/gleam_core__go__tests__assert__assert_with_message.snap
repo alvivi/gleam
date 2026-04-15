@@ -1,0 +1,19 @@
+---
+source: compiler-core/src/go/tests/assert.rs
+expression: "\npub fn go(x: Int) -> Int {\n  assert x > 0 as \"must be positive\"\n  x\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go(x: Int) -> Int {
+  assert x > 0 as "must be positive"
+  x
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go(x int64) int64 {
+  if !((x > int64(0))) { panic("must be positive") }
+  return x
+}
