@@ -1,0 +1,18 @@
+---
+source: compiler-core/src/go/tests/assert.rs
+expression: "\npub fn go() -> Nil {\n  assert True\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Nil {
+  assert True
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() struct{} {
+  if !(true) { panic("assertion failed at my/mod:3") }
+  return struct{}{}
+}

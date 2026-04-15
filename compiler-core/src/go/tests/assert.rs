@@ -25,6 +25,17 @@ pub fn go(x: Int) -> Int {
 }
 
 #[test]
+fn assert_as_last_statement_of_nil_fn() {
+    assert_go!(
+        r#"
+pub fn go() -> Nil {
+  assert True
+}
+"#,
+    );
+}
+
+#[test]
 fn assert_with_message() {
     assert_go!(
         r#"

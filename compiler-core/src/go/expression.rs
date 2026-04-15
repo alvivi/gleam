@@ -98,7 +98,7 @@ impl<'a> Generator<'a> {
 
         let params_doc = join(params, ", ".to_doc());
         let return_type = self.go_type(&f.return_type);
-        let body = self.function_body(&f.body);
+        let body = self.function_body(&f.body, &f.return_type);
 
         docvec![
             "func ",
@@ -115,12 +115,19 @@ impl<'a> Generator<'a> {
         ]
     }
 
-    fn function_body(&mut self, body: &'a [TypedStatement]) -> Document<'a> {
+    fn function_body(&mut self, body: &'a [TypedStatement], return_type: &Type) -> Document<'a> {
         let last_idx = body.len().saturating_sub(1);
-        let statements = body
+        let mut statements: Vec<Document<'a>> = body
             .iter()
             .enumerate()
-            .map(|(i, stmt)| self.statement(stmt, i == last_idx));
+            .map(|(i, stmt)| self.statement(stmt, i == last_idx))
+            .collect();
+        // Gleam lets `assert` (and other Nil-typed non-expression statements)
+        // stand in last position of a `-> Nil` function. Go still wants an
+        // explicit return when the signature is non-void.
+        if return_type.is_nil() && !matches!(body.last(), Some(Statement::Expression(_))) {
+            statements.push("return struct{}{}".to_doc());
+        }
         join(statements, line())
     }
 
