@@ -317,6 +317,7 @@ impl<'a> Go<'a> {
             self.go_module(writer, module)?;
         }
         self.write_go_mod(writer)?;
+        self.write_prelude(writer)?;
         Ok(())
     }
 
@@ -338,5 +339,13 @@ impl<'a> Go<'a> {
         }
         let content = go::go_mod(self.project_name);
         writer.write(&path, &content)
+    }
+
+    fn write_prelude(&self, writer: &impl FileSystemWriter) -> Result<()> {
+        let path = self.output_directory.join("prelude").join("prelude.go");
+        if writer.exists(&path) {
+            return Ok(());
+        }
+        writer.write(&path, go::PRELUDE)
     }
 }

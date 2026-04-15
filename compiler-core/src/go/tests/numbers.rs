@@ -56,6 +56,50 @@ pub fn go() -> Float {
 }
 
 #[test]
+fn int_div() {
+    assert_go!(
+        r#"
+pub fn go(a: Int, b: Int) -> Int {
+  a / b
+}
+"#,
+    );
+}
+
+#[test]
+fn int_remainder() {
+    assert_go!(
+        r#"
+pub fn go(a: Int, b: Int) -> Int {
+  a % b
+}
+"#,
+    );
+}
+
+#[test]
+fn float_div() {
+    assert_go!(
+        r#"
+pub fn go(a: Float, b: Float) -> Float {
+  a /. b
+}
+"#,
+    );
+}
+
+#[test]
+fn no_prelude_when_unused() {
+    assert_go!(
+        r#"
+pub fn go(a: Int, b: Int) -> Int {
+  a + b
+}
+"#,
+    );
+}
+
+#[test]
 fn int_comparison() {
     assert_go!(
         r#"

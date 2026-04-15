@@ -7,6 +7,8 @@ mod tests;
 
 pub const GO_VERSION: &str = "1.21";
 
+pub const PRELUDE: &str = include_str!("../templates/prelude.go");
+
 pub fn module(module: &TypedModule, line_numbers: &LineNumbers, package_name: &str) -> String {
     let mut generator = expression::Generator::new(module, line_numbers, package_name);
     generator.compile().to_pretty_string(80)

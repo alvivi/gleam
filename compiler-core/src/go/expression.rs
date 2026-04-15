@@ -19,6 +19,7 @@ pub(crate) struct Generator<'a> {
     #[allow(dead_code)]
     line_numbers: &'a LineNumbers,
     package_name: &'a str,
+    prelude_used: bool,
 }
 
 impl<'a> Generator<'a> {
@@ -31,6 +32,7 @@ impl<'a> Generator<'a> {
             module,
             line_numbers,
             package_name,
+            prelude_used: false,
         }
     }
 
@@ -49,11 +51,30 @@ impl<'a> Generator<'a> {
             .map(|f| self.function(f))
             .collect_vec();
 
+        let imports = if self.prelude_used {
+            let path = format!("gleam/{}/prelude", self.package_name);
+            docvec![
+                line(),
+                "import prelude \"",
+                Document::eco_string(path.into()),
+                "\"",
+                line(),
+            ]
+        } else {
+            Document::Vec(vec![])
+        };
+
         if functions.is_empty() {
-            docvec![package_decl, line()]
+            docvec![package_decl, line(), imports]
         } else {
             let separated = Itertools::intersperse(functions.into_iter(), line()).collect();
-            docvec![package_decl, line(), line(), Document::Vec(separated)]
+            docvec![
+                package_decl,
+                line(),
+                imports,
+                line(),
+                Document::Vec(separated)
+            ]
         }
     }
 
@@ -203,23 +224,47 @@ impl<'a> Generator<'a> {
     }
 
     fn bin_op(&mut self, name: BinOp, left: &'a TypedExpr, right: &'a TypedExpr) -> Document<'a> {
-        let op: Document<'a> = match name {
-            BinOp::And => " && ".to_doc(),
-            BinOp::Or => " || ".to_doc(),
-            BinOp::Eq => " == ".to_doc(),
-            BinOp::NotEq => " != ".to_doc(),
-            BinOp::LtInt | BinOp::LtFloat => " < ".to_doc(),
-            BinOp::LtEqInt | BinOp::LtEqFloat => " <= ".to_doc(),
-            BinOp::GtInt | BinOp::GtFloat => " > ".to_doc(),
-            BinOp::GtEqInt | BinOp::GtEqFloat => " >= ".to_doc(),
-            BinOp::AddInt | BinOp::AddFloat => " + ".to_doc(),
-            BinOp::SubInt | BinOp::SubFloat => " - ".to_doc(),
-            BinOp::MultInt | BinOp::MultFloat => " * ".to_doc(),
-            BinOp::DivInt | BinOp::DivFloat => " / ".to_doc(),
-            BinOp::RemainderInt => " % ".to_doc(),
-            BinOp::Concatenate => " + ".to_doc(),
-        };
-        docvec!["(", self.expression(left), op, self.expression(right), ")",]
+        match name {
+            BinOp::DivInt => self.prelude_call("DivInt", left, right),
+            BinOp::RemainderInt => self.prelude_call("RemInt", left, right),
+            BinOp::DivFloat => self.prelude_call("DivFloat", left, right),
+            _ => {
+                let op: Document<'a> = match name {
+                    BinOp::And => " && ".to_doc(),
+                    BinOp::Or => " || ".to_doc(),
+                    BinOp::Eq => " == ".to_doc(),
+                    BinOp::NotEq => " != ".to_doc(),
+                    BinOp::LtInt | BinOp::LtFloat => " < ".to_doc(),
+                    BinOp::LtEqInt | BinOp::LtEqFloat => " <= ".to_doc(),
+                    BinOp::GtInt | BinOp::GtFloat => " > ".to_doc(),
+                    BinOp::GtEqInt | BinOp::GtEqFloat => " >= ".to_doc(),
+                    BinOp::AddInt | BinOp::AddFloat => " + ".to_doc(),
+                    BinOp::SubInt | BinOp::SubFloat => " - ".to_doc(),
+                    BinOp::MultInt | BinOp::MultFloat => " * ".to_doc(),
+                    BinOp::Concatenate => " + ".to_doc(),
+                    BinOp::DivInt | BinOp::DivFloat | BinOp::RemainderInt => unreachable!(),
+                };
+                docvec!["(", self.expression(left), op, self.expression(right), ")",]
+            }
+        }
+    }
+
+    fn prelude_call(
+        &mut self,
+        function: &'static str,
+        left: &'a TypedExpr,
+        right: &'a TypedExpr,
+    ) -> Document<'a> {
+        self.prelude_used = true;
+        docvec![
+            "prelude.",
+            function,
+            "(",
+            self.expression(left),
+            ", ",
+            self.expression(right),
+            ")",
+        ]
     }
 
     fn go_type(&self, type_: &Type) -> Document<'a> {
