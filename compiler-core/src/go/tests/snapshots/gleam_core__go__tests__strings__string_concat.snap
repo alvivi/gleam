@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/strings.rs
+expression: "\npub fn go() -> String {\n  \"hello\" <> \" \" <> \"world\"\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> String {
+  "hello" <> " " <> "world"
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() string {
+  return (("hello" + " ") + "world")
+}

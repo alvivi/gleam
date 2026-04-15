@@ -1,0 +1,25 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+expression: "\npub fn two_words() -> Int {\n  0\n}\n\nfn three_word_name() -> Int {\n  0\n}\n"
+---
+----- SOURCE CODE
+
+pub fn two_words() -> Int {
+  0
+}
+
+fn three_word_name() -> Int {
+  0
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func TwoWords() int64 {
+  return int64(0)
+}
+
+func threeWordName() int64 {
+  return int64(0)
+}

@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+expression: "\npub fn answer() -> Int {\n  42\n}\n"
+---
+----- SOURCE CODE
+
+pub fn answer() -> Int {
+  42
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Answer() int64 {
+  return int64(42)
+}

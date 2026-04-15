@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/numbers.rs
+expression: "\npub fn go() -> Float {\n  1.5\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Float {
+  1.5
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() float64 {
+  return float64(1.5)
+}
