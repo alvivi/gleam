@@ -1,0 +1,19 @@
+---
+source: compiler-core/src/go/tests/numbers.rs
+expression: "\npub fn go(a: Float, b: Float) -> Float {\n  a /. b\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go(a: Float, b: Float) -> Float {
+  a /. b
+}
+
+
+----- COMPILED GO
+package thepackage
+
+import prelude "gleam/thepackage/prelude"
+
+func Go(a float64, b float64) float64 {
+  return prelude.DivFloat(a, b)
+}

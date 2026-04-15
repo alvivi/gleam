@@ -12,6 +12,8 @@ pub fn go() -> Float {
 ----- COMPILED GO
 package thepackage
 
+import prelude "gleam/thepackage/prelude"
+
 func Go() float64 {
-  return ((float64(1.0) + (float64(2.0) * float64(3.5))) - (float64(4.0) / float64(2.0)))
+  return ((float64(1.0) + (float64(2.0) * float64(3.5))) - prelude.DivFloat(float64(4.0), float64(2.0)))
 }
