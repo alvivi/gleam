@@ -1,0 +1,10 @@
+---
+source: compiler-core/src/go/tests/modules.rs
+assertion_line: 5
+expression: ""
+---
+----- SOURCE CODE
+
+
+----- COMPILED GO
+package thepackage
