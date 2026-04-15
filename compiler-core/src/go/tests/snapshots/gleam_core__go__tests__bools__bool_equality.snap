@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/bools.rs
+expression: "\npub fn go() -> Bool {\n  True == False\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Bool {
+  True == False
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() bool {
+  return (true == false)
+}

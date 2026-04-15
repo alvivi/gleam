@@ -12,8 +12,12 @@ use crate::{
 use camino::Utf8PathBuf;
 use std::collections::HashMap;
 
+mod bools;
+mod functions;
 mod modules;
+mod numbers;
 mod plumbing;
+mod strings;
 
 pub static CURRENT_PACKAGE: &str = "thepackage";
 

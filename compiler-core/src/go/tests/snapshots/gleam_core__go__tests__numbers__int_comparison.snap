@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/numbers.rs
+expression: "\npub fn go() -> Bool {\n  1 < 2\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Bool {
+  1 < 2
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() bool {
+  return (int64(1) < int64(2))
+}

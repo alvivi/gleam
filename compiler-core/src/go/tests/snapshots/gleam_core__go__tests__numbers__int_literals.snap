@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/numbers.rs
+expression: "\npub fn go() -> Int {\n  42\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  42
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  return int64(42)
+}

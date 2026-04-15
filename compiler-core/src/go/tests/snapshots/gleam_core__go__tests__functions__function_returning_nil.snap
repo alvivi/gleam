@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+expression: "\npub fn noop() -> Nil {\n  Nil\n}\n"
+---
+----- SOURCE CODE
+
+pub fn noop() -> Nil {
+  Nil
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Noop() struct{} {
+  return struct{}{}
+}

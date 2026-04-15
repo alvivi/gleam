@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+expression: "\nfn helper() -> Int {\n  1\n}\n"
+---
+----- SOURCE CODE
+
+fn helper() -> Int {
+  1
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func helper() int64 {
+  return int64(1)
+}

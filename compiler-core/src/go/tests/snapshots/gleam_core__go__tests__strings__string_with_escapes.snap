@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/strings.rs
+expression: "\npub fn go() -> String {\n  \"a\\nb\\\"c\\\\d\"\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> String {
+  "a\nb\"c\\d"
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() string {
+  return "a\nb\"c\\d"
+}

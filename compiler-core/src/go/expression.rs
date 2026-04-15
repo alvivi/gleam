@@ -1,15 +1,22 @@
+use std::sync::Arc;
+
+use ecow::EcoString;
+use itertools::Itertools;
+
 use crate::{
-    ast::TypedModule,
+    ast::*,
     docvec,
     line_numbers::LineNumbers,
     pretty::{Document, Documentable, line},
+    type_::Type,
 };
 
-use super::go_package_name;
+use super::{go_package_name, is_go_reserved_word};
+
+const INDENT: isize = 2;
 
 #[derive(Debug)]
 pub(crate) struct Generator<'a> {
-    #[allow(dead_code)]
     module: &'a TypedModule,
     #[allow(dead_code)]
     line_numbers: &'a LineNumbers,
@@ -30,7 +37,268 @@ impl<'a> Generator<'a> {
     }
 
     pub fn compile(&mut self) -> Document<'a> {
-        let package = go_package_name(self.package_name);
-        docvec!["package ", Document::eco_string(package.into()), line()]
+        let package_decl = docvec![
+            "package ",
+            Document::eco_string(go_package_name(self.package_name).into()),
+        ];
+
+        let functions = self
+            .module
+            .definitions
+            .functions
+            .iter()
+            .filter(|f| f.external_go.is_none())
+            .map(|f| self.function(f))
+            .collect_vec();
+
+        if functions.is_empty() {
+            docvec![package_decl, line()]
+        } else {
+            let separated = Itertools::intersperse(functions.into_iter(), line()).collect();
+            docvec![package_decl, line(), line(), Document::Vec(separated)]
+        }
     }
+
+    fn function(&mut self, f: &'a TypedFunction) -> Document<'a> {
+        let name = match &f.name {
+            Some((_, n)) => go_identifier(n, f.publicity.is_importable()),
+            None => "anonymous".to_string(),
+        };
+
+        let params = f
+            .arguments
+            .iter()
+            .map(|arg| {
+                let name = arg
+                    .names
+                    .get_variable_name()
+                    .map(|n| go_local_name(n))
+                    .unwrap_or_else(|| "_".to_string());
+                docvec![
+                    Document::eco_string(name.into()),
+                    " ",
+                    self.go_type(&arg.type_),
+                ]
+            })
+            .collect_vec();
+
+        let params_doc =
+            Document::Vec(Itertools::intersperse(params.into_iter(), ", ".to_doc()).collect());
+        let return_type = self.go_type(&f.return_type);
+
+        let body = self.function_body(&f.body, &f.return_type);
+
+        docvec![
+            "func ",
+            Document::eco_string(name.into()),
+            "(",
+            params_doc,
+            ") ",
+            return_type,
+            " {",
+            docvec![line(), body].nest(INDENT),
+            line(),
+            "}",
+            line(),
+        ]
+    }
+
+    fn function_body(&mut self, body: &'a [TypedStatement], return_type: &Type) -> Document<'a> {
+        let mut statements = Vec::with_capacity(body.len());
+        let last_idx = body.len().saturating_sub(1);
+        for (i, stmt) in body.iter().enumerate() {
+            let is_last = i == last_idx;
+            statements.push(self.statement(stmt, is_last, return_type));
+        }
+        Document::Vec(Itertools::intersperse(statements.into_iter(), line()).collect())
+    }
+
+    fn statement(
+        &mut self,
+        statement: &'a TypedStatement,
+        is_last: bool,
+        _return_type: &Type,
+    ) -> Document<'a> {
+        match statement {
+            Statement::Expression(expr) => {
+                let doc = self.expression(expr);
+                if is_last {
+                    docvec!["return ", doc]
+                } else {
+                    docvec!["_ = ", doc]
+                }
+            }
+            Statement::Assignment(_) | Statement::Use(_) | Statement::Assert(_) => {
+                unimplemented!("Go codegen: non-expression statements land in a later M2 step")
+            }
+        }
+    }
+
+    fn expression(&mut self, expression: &'a TypedExpr) -> Document<'a> {
+        match expression {
+            TypedExpr::Int { value, .. } => self.int(value),
+            TypedExpr::Float { value, .. } => self.float(value),
+            TypedExpr::String { value, .. } => string_literal(value),
+            TypedExpr::Var { name, .. } => self.var(name, &expression.type_()),
+            TypedExpr::BinOp {
+                name, left, right, ..
+            } => self.bin_op(*name, left, right),
+            TypedExpr::NegateBool { value, .. } => {
+                docvec!["!", self.expression(value)]
+            }
+            TypedExpr::NegateInt { value, .. } => {
+                docvec!["-", self.expression(value)]
+            }
+            _ => unimplemented!("Go codegen: expression kind lands in a later M2 step"),
+        }
+    }
+
+    fn int(&self, value: &str) -> Document<'a> {
+        docvec!["int64(", Document::eco_string(value.into()), ")"]
+    }
+
+    fn float(&self, value: &str) -> Document<'a> {
+        docvec!["float64(", Document::eco_string(value.into()), ")"]
+    }
+
+    fn var(&self, name: &EcoString, _type_: &Arc<Type>) -> Document<'a> {
+        match name.as_str() {
+            "True" => "true".to_doc(),
+            "False" => "false".to_doc(),
+            "Nil" => "struct{}{}".to_doc(),
+            _ => Document::eco_string(go_local_name(name).into()),
+        }
+    }
+
+    fn bin_op(&mut self, name: BinOp, left: &'a TypedExpr, right: &'a TypedExpr) -> Document<'a> {
+        let op: Document<'a> = match name {
+            BinOp::And => " && ".to_doc(),
+            BinOp::Or => " || ".to_doc(),
+            BinOp::Eq => " == ".to_doc(),
+            BinOp::NotEq => " != ".to_doc(),
+            BinOp::LtInt | BinOp::LtFloat => " < ".to_doc(),
+            BinOp::LtEqInt | BinOp::LtEqFloat => " <= ".to_doc(),
+            BinOp::GtInt | BinOp::GtFloat => " > ".to_doc(),
+            BinOp::GtEqInt | BinOp::GtEqFloat => " >= ".to_doc(),
+            BinOp::AddInt | BinOp::AddFloat => " + ".to_doc(),
+            BinOp::SubInt | BinOp::SubFloat => " - ".to_doc(),
+            BinOp::MultInt | BinOp::MultFloat => " * ".to_doc(),
+            BinOp::DivInt | BinOp::DivFloat => " / ".to_doc(),
+            BinOp::RemainderInt => " % ".to_doc(),
+            BinOp::Concatenate => " + ".to_doc(),
+        };
+        docvec!["(", self.expression(left), op, self.expression(right), ")",]
+    }
+
+    fn go_type(&self, type_: &Type) -> Document<'a> {
+        if type_.is_int() {
+            "int64".to_doc()
+        } else if type_.is_float() {
+            "float64".to_doc()
+        } else if type_.is_bool() {
+            "bool".to_doc()
+        } else if type_.is_string() {
+            "string".to_doc()
+        } else if type_.is_nil() {
+            "struct{}".to_doc()
+        } else {
+            unimplemented!("Go codegen: complex type lowering lands in later milestones")
+        }
+    }
+}
+
+fn string_literal(value: &str) -> Document<'_> {
+    // Gleam stores string literals with escape sequences (`\n`, `\t`, `\"`,
+    // `\\`) preserved as source text. Go's string-literal syntax is a
+    // superset for those cases so they can be emitted verbatim. Literal
+    // newlines can appear in multi-line strings and must be re-escaped.
+    // `\u{NNNN}` needs rewriting to Go's `\uNNNN`, handled in a later M2 step.
+    let body: EcoString = if value.contains('\n') {
+        value.replace('\n', r"\n").into()
+    } else {
+        value.into()
+    };
+    docvec!["\"", Document::eco_string(body), "\""]
+}
+
+fn go_identifier(name: &str, public: bool) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut capitalise = public;
+    for ch in name.chars() {
+        if ch == '_' {
+            capitalise = true;
+            continue;
+        }
+        if capitalise {
+            out.extend(ch.to_uppercase());
+            capitalise = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    if out.is_empty() {
+        out.push('_');
+    }
+    if is_go_reserved_word(&out) || is_go_predeclared_identifier(&out) {
+        out.push('_');
+    }
+    out
+}
+
+fn go_local_name(name: &str) -> String {
+    if is_go_reserved_word(name) || is_go_predeclared_identifier(name) {
+        format!("{name}_")
+    } else {
+        name.to_string()
+    }
+}
+
+fn is_go_predeclared_identifier(word: &str) -> bool {
+    matches!(
+        word,
+        "any"
+            | "bool"
+            | "byte"
+            | "comparable"
+            | "complex64"
+            | "complex128"
+            | "error"
+            | "float32"
+            | "float64"
+            | "int"
+            | "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "rune"
+            | "string"
+            | "uint"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "uintptr"
+            | "true"
+            | "false"
+            | "iota"
+            | "nil"
+            | "append"
+            | "cap"
+            | "clear"
+            | "close"
+            | "complex"
+            | "copy"
+            | "delete"
+            | "imag"
+            | "len"
+            | "make"
+            | "max"
+            | "min"
+            | "new"
+            | "panic"
+            | "print"
+            | "println"
+            | "real"
+            | "recover"
+    )
 }

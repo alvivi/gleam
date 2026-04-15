@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+expression: "\npub fn type_() -> Int {\n  0\n}\n"
+---
+----- SOURCE CODE
+
+pub fn type_() -> Int {
+  0
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Type() int64 {
+  return int64(0)
+}
