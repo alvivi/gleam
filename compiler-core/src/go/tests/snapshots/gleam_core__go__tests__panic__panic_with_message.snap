@@ -1,0 +1,17 @@
+---
+source: compiler-core/src/go/tests/panic.rs
+expression: "\npub fn go() -> Int {\n  panic as \"something is wrong\"\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  panic as "something is wrong"
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  return (func() int64 { panic("something is wrong") }())
+}
