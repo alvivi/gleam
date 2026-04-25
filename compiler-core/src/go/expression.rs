@@ -291,21 +291,32 @@ impl<'a> Generator<'a> {
             if clause.pattern.len() != 1 {
                 unimplemented!("Go codegen: multi-subject case not yet supported");
             }
+            // Pattern bindings (e.g. `x -> ...`) only live for one clause,
+            // so save and restore the local-name scope around lowering and
+            // body generation.
+            let saved_clause_names = self.local_names.clone();
+            let (condition, bindings) =
+                self.lower_case_pattern(&subject_name, &clause.pattern[0]);
             let body = self.expression(&clause.then);
-            let return_doc = docvec!["return ", body];
-            match self.case_literal_test(&subject_name, &clause.pattern[0]) {
+            self.local_names = saved_clause_names;
+
+            let mut clause_body: Vec<Document<'a>> = bindings;
+            clause_body.push(docvec!["return ", body]);
+            let clause_body_doc = join(clause_body, line());
+
+            match condition {
                 Some(condition) => {
                     body_docs.push(docvec![
                         "if ",
                         condition,
                         " {",
-                        docvec![line(), return_doc].nest(INDENT),
+                        docvec![line(), clause_body_doc].nest(INDENT),
                         line(),
                         "}",
                     ]);
                 }
                 None => {
-                    body_docs.push(return_doc);
+                    body_docs.push(clause_body_doc);
                     catch_all_emitted = true;
                     break;
                 }
@@ -331,28 +342,53 @@ impl<'a> Generator<'a> {
         ]
     }
 
-    fn case_literal_test(
+    /// Lower a single clause pattern against the bound subject. Returns the
+    /// match condition (`None` means the pattern always matches and so
+    /// terminates the if-chain) plus any bindings the pattern introduces
+    /// into the clause body.
+    fn lower_case_pattern(
         &mut self,
         subject: &EcoString,
         pattern: &'a TypedPattern,
-    ) -> Option<Document<'a>> {
+    ) -> (Option<Document<'a>>, Vec<Document<'a>>) {
         match pattern {
-            Pattern::Discard { .. } => None,
-            Pattern::Int { value, .. } => Some(docvec![
-                subject.clone().to_doc(),
-                " == ",
-                numeric_literal("int64", value),
-            ]),
-            Pattern::Float { value, .. } => Some(docvec![
-                subject.clone().to_doc(),
-                " == ",
-                numeric_literal("float64", value),
-            ]),
-            Pattern::String { value, .. } => Some(docvec![
-                subject.clone().to_doc(),
-                " == ",
-                string_literal(value),
-            ]),
+            Pattern::Discard { .. } => (None, vec![]),
+            Pattern::Variable { name, .. } => {
+                let mangled = self.register_local(name);
+                let binding = docvec![
+                    mangled.clone().to_doc(),
+                    " := ",
+                    subject.clone().to_doc(),
+                    line(),
+                    "_ = ",
+                    mangled.to_doc(),
+                ];
+                (None, vec![binding])
+            }
+            Pattern::Int { value, .. } => (
+                Some(docvec![
+                    subject.clone().to_doc(),
+                    " == ",
+                    numeric_literal("int64", value),
+                ]),
+                vec![],
+            ),
+            Pattern::Float { value, .. } => (
+                Some(docvec![
+                    subject.clone().to_doc(),
+                    " == ",
+                    numeric_literal("float64", value),
+                ]),
+                vec![],
+            ),
+            Pattern::String { value, .. } => (
+                Some(docvec![
+                    subject.clone().to_doc(),
+                    " == ",
+                    string_literal(value),
+                ]),
+                vec![],
+            ),
             Pattern::Constructor {
                 name, arguments, ..
             } if arguments.is_empty() => {
@@ -363,7 +399,10 @@ impl<'a> Generator<'a> {
                         "Go codegen: case on custom-type constructors not yet supported"
                     ),
                 };
-                Some(docvec![subject.clone().to_doc(), " == ", go_value])
+                (
+                    Some(docvec![subject.clone().to_doc(), " == ", go_value]),
+                    vec![],
+                )
             }
             _ => unimplemented!("Go codegen: case pattern kind not yet supported"),
         }

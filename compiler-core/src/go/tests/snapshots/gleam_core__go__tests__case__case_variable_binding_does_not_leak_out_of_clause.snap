@@ -1,0 +1,29 @@
+---
+source: compiler-core/src/go/tests/case.rs
+assertion_line: 148
+expression: "\npub fn go(x: Int) -> Int {\n  let result = case x {\n    n -> n + 1\n  }\n  result\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go(x: Int) -> Int {
+  let result = case x {
+    n -> n + 1
+  }
+  result
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go(x int64) int64 {
+  result := (func() int64 {
+    _case_subject := x
+    _ = _case_subject
+    n := _case_subject
+    _ = n
+    return (n + int64(1))
+  }())
+  _ = result
+  return result
+}

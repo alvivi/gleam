@@ -1,0 +1,29 @@
+---
+source: compiler-core/src/go/tests/case.rs
+assertion_line: 134
+expression: "\npub fn go(x: Int) -> Int {\n  let x = x + 1\n  case x {\n    x -> x * 10\n  }\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go(x: Int) -> Int {
+  let x = x + 1
+  case x {
+    x -> x * 10
+  }
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go(x int64) int64 {
+  x_1 := (x + int64(1))
+  _ = x_1
+  return (func() int64 {
+    _case_subject := x_1
+    _ = _case_subject
+    x_2 := _case_subject
+    _ = x_2
+    return (x_2 * int64(10))
+  }())
+}
