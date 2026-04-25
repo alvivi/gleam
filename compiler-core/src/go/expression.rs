@@ -285,9 +285,6 @@ impl<'a> Generator<'a> {
             if !clause.alternative_patterns.is_empty() {
                 unimplemented!("Go codegen: alternative case patterns not yet supported");
             }
-            if clause.guard.is_some() {
-                unimplemented!("Go codegen: case guards not yet supported");
-            }
             // Pattern bindings (e.g. `x -> ...`) only live for one clause,
             // so save and restore the local-name scope around lowering and
             // body generation.
@@ -302,17 +299,38 @@ impl<'a> Generator<'a> {
                 }
                 bindings.extend(pattern_bindings);
             }
+            // The guard runs with pattern bindings in scope, so it must be
+            // lowered *after* `lower_case_pattern` registers them and before
+            // the clause-local scope is restored.
+            let guard_doc = clause.guard.as_ref().map(|g| self.lower_guard(g));
             let body = self.expression(&clause.then);
             self.local_names = saved_clause_names;
 
+            let return_doc = docvec!["return ", body];
+            let conditional_return = match &guard_doc {
+                Some(guard) => docvec![
+                    "if ",
+                    guard.clone(),
+                    " {",
+                    docvec![line(), return_doc].nest(INDENT),
+                    line(),
+                    "}",
+                ],
+                None => return_doc,
+            };
             let mut clause_body: Vec<Document<'a>> = bindings;
-            clause_body.push(docvec!["return ", body]);
+            clause_body.push(conditional_return);
             let clause_body_doc = join(clause_body, line());
 
             if conditions.is_empty() {
+                // No pattern conditions: bindings + body live at the IIFE's
+                // top level. With a guard the clause may still fail, so
+                // execution can fall through to the next clause.
                 body_docs.push(clause_body_doc);
-                catch_all_emitted = true;
-                break;
+                if guard_doc.is_none() {
+                    catch_all_emitted = true;
+                    break;
+                }
             } else {
                 // `==` binds tighter than `&&` in Go, so the per-position
                 // equality tests do not need parentheses around them.
@@ -410,6 +428,82 @@ impl<'a> Generator<'a> {
                 )
             }
             _ => unimplemented!("Go codegen: case pattern kind not yet supported"),
+        }
+    }
+
+    fn lower_guard(&mut self, guard: &'a TypedClauseGuard) -> Document<'a> {
+        match guard {
+            ClauseGuard::Block { value, .. } => self.lower_guard(value),
+            ClauseGuard::Not { expression, .. } => {
+                docvec!["!", self.lower_guard(expression)]
+            }
+            ClauseGuard::Var { name, .. } => self.lookup_local(name).to_doc(),
+            ClauseGuard::Constant(constant) => self.lower_guard_constant(constant),
+            ClauseGuard::BinaryOperator {
+                operator,
+                left,
+                right,
+                ..
+            } => {
+                let left_doc = self.lower_guard(left);
+                let right_doc = self.lower_guard(right);
+                self.lower_guard_binop(*operator, left_doc, right_doc)
+            }
+            _ => unimplemented!("Go codegen: guard expression kind not yet supported"),
+        }
+    }
+
+    fn lower_guard_constant(&mut self, constant: &'a TypedConstant) -> Document<'a> {
+        match constant {
+            Constant::Int { value, .. } => numeric_literal("int64", value),
+            Constant::Float { value, .. } => numeric_literal("float64", value),
+            Constant::String { value, .. } => string_literal(value),
+            Constant::Var { name, .. } => match name.as_str() {
+                "True" => "true".to_doc(),
+                "False" => "false".to_doc(),
+                _ => unimplemented!("Go codegen: guard constant references not yet supported"),
+            },
+            _ => unimplemented!("Go codegen: guard constant kind not yet supported"),
+        }
+    }
+
+    fn lower_guard_binop(
+        &mut self,
+        name: BinOp,
+        left: Document<'a>,
+        right: Document<'a>,
+    ) -> Document<'a> {
+        match name {
+            BinOp::DivInt => {
+                self.prelude_used = true;
+                docvec!["prelude.DivInt(", left, ", ", right, ")"]
+            }
+            BinOp::RemainderInt => {
+                self.prelude_used = true;
+                docvec!["prelude.RemInt(", left, ", ", right, ")"]
+            }
+            BinOp::DivFloat => {
+                self.prelude_used = true;
+                docvec!["prelude.DivFloat(", left, ", ", right, ")"]
+            }
+            _ => {
+                let op: Document<'a> = match name {
+                    BinOp::And => " && ".to_doc(),
+                    BinOp::Or => " || ".to_doc(),
+                    BinOp::Eq => " == ".to_doc(),
+                    BinOp::NotEq => " != ".to_doc(),
+                    BinOp::LtInt | BinOp::LtFloat => " < ".to_doc(),
+                    BinOp::LtEqInt | BinOp::LtEqFloat => " <= ".to_doc(),
+                    BinOp::GtInt | BinOp::GtFloat => " > ".to_doc(),
+                    BinOp::GtEqInt | BinOp::GtEqFloat => " >= ".to_doc(),
+                    BinOp::AddInt | BinOp::AddFloat => " + ".to_doc(),
+                    BinOp::SubInt | BinOp::SubFloat => " - ".to_doc(),
+                    BinOp::MultInt | BinOp::MultFloat => " * ".to_doc(),
+                    BinOp::Concatenate => " + ".to_doc(),
+                    BinOp::DivInt | BinOp::DivFloat | BinOp::RemainderInt => unreachable!(),
+                };
+                docvec!["(", left, op, right, ")"]
+            }
         }
     }
 

@@ -1,0 +1,38 @@
+---
+source: compiler-core/src/go/tests/case.rs
+assertion_line: 363
+expression: "\npub fn go(x: Int, y: Int) -> Int {\n  case x, y {\n    a, b if a > b -> a\n    a, b -> b\n  }\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go(x: Int, y: Int) -> Int {
+  case x, y {
+    a, b if a > b -> a
+    a, b -> b
+  }
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go(x int64, y int64) int64 {
+  return (func() int64 {
+    _case_subject := x
+    _ = _case_subject
+    _case_subject_1 := y
+    _ = _case_subject_1
+    a := _case_subject
+    _ = a
+    b := _case_subject_1
+    _ = b
+    if (a > b) {
+      return a
+    }
+    a_1 := _case_subject
+    _ = a_1
+    b_1 := _case_subject_1
+    _ = b_1
+    return b_1
+  }())
+}

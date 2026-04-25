@@ -272,3 +272,116 @@ pub fn go(a: Bool, b: Bool) -> Int {
 "#,
     );
 }
+
+#[test]
+fn case_guard_simple() {
+    assert_go!(
+        r#"
+pub fn go(x: Int) -> Int {
+  case x {
+    n if n > 0 -> n
+    _ -> 0
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_guard_compound_bool() {
+    assert_go!(
+        r#"
+pub fn go(x: Int) -> Int {
+  case x {
+    n if n > 0 && n < 10 -> n
+    _ -> -1
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_guard_with_or() {
+    assert_go!(
+        r#"
+pub fn go(x: Int) -> Int {
+  case x {
+    n if n == 0 || n == 1 -> n
+    _ -> -1
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_guard_with_not() {
+    assert_go!(
+        r#"
+pub fn go(x: Bool, y: Bool) -> Int {
+  case x {
+    a if !y -> 1
+    _ -> 0
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_guard_references_outer_binding() {
+    assert_go!(
+        r#"
+pub fn go(x: Int, threshold: Int) -> Int {
+  case x {
+    n if n > threshold -> 1
+    _ -> 0
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_guard_on_literal_pattern() {
+    assert_go!(
+        r#"
+pub fn go(x: Int, y: Int) -> Int {
+  case x {
+    0 if y > 0 -> 1
+    0 -> 2
+    _ -> 3
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_guard_multi_subject() {
+    assert_go!(
+        r#"
+pub fn go(x: Int, y: Int) -> Int {
+  case x, y {
+    a, b if a > b -> a
+    a, b -> b
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_guard_string_eq() {
+    assert_go!(
+        r#"
+pub fn go(s: String) -> Int {
+  case s {
+    n if n == "hi" -> 1
+    _ -> 0
+  }
+}
+"#,
+    );
+}
