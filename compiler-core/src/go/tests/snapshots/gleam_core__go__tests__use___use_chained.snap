@@ -1,0 +1,40 @@
+---
+source: compiler-core/src/go/tests/use_.rs
+assertion_line: 21
+expression: "\nfn with_a(callback: fn(Int) -> Int) -> Int {\n  callback(1)\n}\n\nfn with_b(callback: fn(Int) -> Int) -> Int {\n  callback(2)\n}\n\npub fn go() -> Int {\n  use a <- with_a\n  use b <- with_b\n  a + b\n}\n"
+---
+----- SOURCE CODE
+
+fn with_a(callback: fn(Int) -> Int) -> Int {
+  callback(1)
+}
+
+fn with_b(callback: fn(Int) -> Int) -> Int {
+  callback(2)
+}
+
+pub fn go() -> Int {
+  use a <- with_a
+  use b <- with_b
+  a + b
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func withA(callback func(int64) int64) int64 {
+  return callback(int64(1))
+}
+
+func withB(callback func(int64) int64) int64 {
+  return callback(int64(2))
+}
+
+func Go() int64 {
+  return withA(func(a int64) int64 {
+    return withB(func(b int64) int64 {
+      return (a + b)
+    })
+  })
+}

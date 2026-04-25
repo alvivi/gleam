@@ -149,7 +149,17 @@ impl<'a> Generator<'a> {
             }
             Statement::Assignment(assignment) => self.assignment(assignment),
             Statement::Assert(assert) => self.assert(assert),
-            Statement::Use(_) => unimplemented!("Go codegen: `use` not yet supported"),
+            // `use` reaches codegen pre-desugared by the typechecker into the
+            // call it expands to (`use a <- f(x); rest` becomes
+            // `f(x, fn(a) { rest })`), so it lowers like any other call.
+            Statement::Use(use_) => {
+                let doc = self.expression(&use_.call);
+                if is_last {
+                    docvec!["return ", doc]
+                } else {
+                    docvec!["_ = ", doc]
+                }
+            }
         }
     }
 

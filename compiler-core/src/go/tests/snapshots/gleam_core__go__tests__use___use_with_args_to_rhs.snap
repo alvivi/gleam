@@ -1,0 +1,29 @@
+---
+source: compiler-core/src/go/tests/use_.rs
+assertion_line: 58
+expression: "\nfn try_int(value: Int, callback: fn(Int) -> Int) -> Int {\n  callback(value + 1)\n}\n\npub fn go() -> Int {\n  use n <- try_int(10)\n  n * 2\n}\n"
+---
+----- SOURCE CODE
+
+fn try_int(value: Int, callback: fn(Int) -> Int) -> Int {
+  callback(value + 1)
+}
+
+pub fn go() -> Int {
+  use n <- try_int(10)
+  n * 2
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func tryInt(value int64, callback func(int64) int64) int64 {
+  return callback((value + int64(1)))
+}
+
+func Go() int64 {
+  return tryInt(int64(10), func(n int64) int64 {
+    return (n * int64(2))
+  })
+}

@@ -25,6 +25,7 @@ mod plumbing;
 mod recursion;
 mod strings;
 mod todo;
+mod use_;
 
 pub static CURRENT_PACKAGE: &str = "thepackage";
 
