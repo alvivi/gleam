@@ -248,8 +248,54 @@ impl<'a> Generator<'a> {
             TypedExpr::Case {
                 subjects, clauses, ..
             } => self.case_expr(subjects, clauses, &expression.type_()),
+            TypedExpr::Fn {
+                arguments, body, ..
+            } => self.closure(arguments, body, &expression.type_()),
             _ => unimplemented!("Go codegen: expression kind not yet supported"),
         }
+    }
+
+    fn closure(
+        &mut self,
+        arguments: &'a [TypedArg],
+        body: &'a [TypedStatement],
+        fn_type: &Type,
+    ) -> Document<'a> {
+        let return_type = fn_type
+            .return_type()
+            .expect("anonymous function expression must have a function type");
+
+        // Save the local-name scope so parameters do not shadow outer
+        // bindings after the closure ends. `local_counts` and `used_go_names`
+        // intentionally remain mutated so a later rebind of the same name
+        // gets a fresh suffix and never collides with one a closure already
+        // claimed inside the enclosing function.
+        let saved_names = self.local_names.clone();
+
+        let params: Vec<Document<'a>> = arguments
+            .iter()
+            .map(|arg| {
+                let param_name = match arg.names.get_variable_name() {
+                    Some(n) => self.register_local(n),
+                    None => "_".into(),
+                };
+                docvec![param_name.to_doc(), " ", self.go_type(&arg.type_)]
+            })
+            .collect();
+
+        let body_doc = self.function_body(body, &return_type);
+        self.local_names = saved_names;
+
+        docvec![
+            "func(",
+            join(params, ", ".to_doc()),
+            ") ",
+            self.go_type(&return_type),
+            " {",
+            docvec![line(), body_doc].nest(INDENT),
+            line(),
+            "}",
+        ]
     }
 
     fn case_expr(
@@ -694,6 +740,9 @@ impl<'a> Generator<'a> {
             "string".to_doc()
         } else if type_.is_nil() {
             "struct{}".to_doc()
+        } else if let Some((args, return_type)) = type_.fn_types() {
+            let args_doc = join(args.iter().map(|a| self.go_type(a)), ", ".to_doc());
+            docvec!["func(", args_doc, ") ", self.go_type(&return_type)]
         } else {
             unimplemented!("Go codegen: complex types not yet supported")
         }

@@ -157,3 +157,139 @@ pub fn go() -> Int {
 "#,
     );
 }
+
+#[test]
+fn anonymous_function_in_let() {
+    assert_go!(
+        r#"
+pub fn go() -> Int {
+  let f = fn(x: Int) -> Int { x + 1 }
+  f(2)
+}
+"#,
+    );
+}
+
+#[test]
+fn anonymous_function_called_immediately() {
+    assert_go!(
+        r#"
+pub fn go() -> Int {
+  fn(x: Int) -> Int { x * 2 }(5)
+}
+"#,
+    );
+}
+
+#[test]
+fn anonymous_function_with_multiple_args() {
+    assert_go!(
+        r#"
+pub fn go() -> Int {
+  let add = fn(a: Int, b: Int) -> Int { a + b }
+  add(3, 4)
+}
+"#,
+    );
+}
+
+#[test]
+fn closure_captures_outer_variable() {
+    assert_go!(
+        r#"
+pub fn go() -> Int {
+  let n = 10
+  let add_n = fn(x: Int) -> Int { x + n }
+  add_n(5)
+}
+"#,
+    );
+}
+
+#[test]
+fn closure_param_shadows_outer_binding() {
+    assert_go!(
+        r#"
+pub fn go() -> Int {
+  let x = 1
+  let f = fn(x: Int) -> Int { x }
+  f(99) + x
+}
+"#,
+    );
+}
+
+#[test]
+fn nested_closures() {
+    assert_go!(
+        r#"
+pub fn go() -> Int {
+  let make_adder = fn(a: Int) -> fn(Int) -> Int {
+    fn(b: Int) -> Int { a + b }
+  }
+  make_adder(10)(5)
+}
+"#,
+    );
+}
+
+#[test]
+fn higher_order_passing_top_level_fn() {
+    assert_go!(
+        r#"
+fn double(x: Int) -> Int {
+  x * 2
+}
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+  f(x)
+}
+
+pub fn go() -> Int {
+  apply(double, 5)
+}
+"#,
+    );
+}
+
+#[test]
+fn higher_order_passing_anonymous_fn() {
+    assert_go!(
+        r#"
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+  f(x)
+}
+
+pub fn go() -> Int {
+  apply(fn(x: Int) -> Int { x + 100 }, 1)
+}
+"#,
+    );
+}
+
+#[test]
+fn capture_syntax() {
+    assert_go!(
+        r#"
+fn add(a: Int, b: Int) -> Int {
+  a + b
+}
+
+pub fn go() -> Int {
+  let inc = add(_, 1)
+  inc(41)
+}
+"#,
+    );
+}
+
+#[test]
+fn closure_returning_nil() {
+    assert_go!(
+        r#"
+pub fn go() -> fn() -> Nil {
+  fn() { Nil }
+}
+"#,
+    );
+}

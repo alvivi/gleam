@@ -1,0 +1,31 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+assertion_line: 272
+expression: "\nfn add(a: Int, b: Int) -> Int {\n  a + b\n}\n\npub fn go() -> Int {\n  let inc = add(_, 1)\n  inc(41)\n}\n"
+---
+----- SOURCE CODE
+
+fn add(a: Int, b: Int) -> Int {
+  a + b
+}
+
+pub fn go() -> Int {
+  let inc = add(_, 1)
+  inc(41)
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func add(a int64, b int64) int64 {
+  return (a + b)
+}
+
+func Go() int64 {
+  inc := func(_capture int64) int64 {
+    return add(_capture, int64(1))
+  }
+  _ = inc
+  return inc(int64(41))
+}

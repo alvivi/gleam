@@ -1,0 +1,28 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+assertion_line: 257
+expression: "\nfn apply(f: fn(Int) -> Int, x: Int) -> Int {\n  f(x)\n}\n\npub fn go() -> Int {\n  apply(fn(x: Int) -> Int { x + 100 }, 1)\n}\n"
+---
+----- SOURCE CODE
+
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+  f(x)
+}
+
+pub fn go() -> Int {
+  apply(fn(x: Int) -> Int { x + 100 }, 1)
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func apply(f func(int64) int64, x int64) int64 {
+  return f(x)
+}
+
+func Go() int64 {
+  return apply(func(x int64) int64 {
+    return (x + int64(100))
+  }, int64(1))
+}

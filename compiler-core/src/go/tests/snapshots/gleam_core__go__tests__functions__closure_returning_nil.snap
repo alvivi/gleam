@@ -1,0 +1,20 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+assertion_line: 288
+expression: "\npub fn go() -> fn() -> Nil {\n  fn() { Nil }\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> fn() -> Nil {
+  fn() { Nil }
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() func() struct{} {
+  return func() struct{} {
+    return struct{}{}
+  }
+}

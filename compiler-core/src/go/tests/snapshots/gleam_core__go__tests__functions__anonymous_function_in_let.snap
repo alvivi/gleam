@@ -1,0 +1,23 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+assertion_line: 163
+expression: "\npub fn go() -> Int {\n  let f = fn(x: Int) -> Int { x + 1 }\n  f(2)\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  let f = fn(x: Int) -> Int { x + 1 }
+  f(2)
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  f := func(x int64) int64 {
+    return (x + int64(1))
+  }
+  _ = f
+  return f(int64(2))
+}

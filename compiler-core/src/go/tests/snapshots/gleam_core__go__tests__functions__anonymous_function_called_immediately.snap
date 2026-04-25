@@ -1,0 +1,18 @@
+---
+source: compiler-core/src/go/tests/functions.rs
+assertion_line: 175
+expression: "\npub fn go() -> Int {\n  fn(x: Int) -> Int { x * 2 }(5)\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go() -> Int {
+  fn(x: Int) -> Int { x * 2 }(5)
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go() int64 {
+  return (int64(5) * int64(2))
+}
