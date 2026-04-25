@@ -1,0 +1,30 @@
+---
+source: compiler-core/src/go/tests/case.rs
+assertion_line: 235
+expression: "\npub fn go(x: Int, y: Int) -> Int {\n  case x, y {\n    a, b -> a * b\n  }\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go(x: Int, y: Int) -> Int {
+  case x, y {
+    a, b -> a * b
+  }
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go(x int64, y int64) int64 {
+  return (func() int64 {
+    _case_subject := x
+    _ = _case_subject
+    _case_subject_1 := y
+    _ = _case_subject_1
+    a := _case_subject
+    _ = a
+    b := _case_subject_1
+    _ = b
+    return (a * b)
+  }())
+}

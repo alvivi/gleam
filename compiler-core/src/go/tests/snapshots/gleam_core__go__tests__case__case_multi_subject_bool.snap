@@ -1,0 +1,41 @@
+---
+source: compiler-core/src/go/tests/case.rs
+assertion_line: 262
+expression: "\npub fn go(a: Bool, b: Bool) -> Int {\n  case a, b {\n    True, True -> 1\n    True, False -> 2\n    False, True -> 3\n    False, False -> 4\n  }\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go(a: Bool, b: Bool) -> Int {
+  case a, b {
+    True, True -> 1
+    True, False -> 2
+    False, True -> 3
+    False, False -> 4
+  }
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go(a bool, b bool) int64 {
+  return (func() int64 {
+    _case_subject := a
+    _ = _case_subject
+    _case_subject_1 := b
+    _ = _case_subject_1
+    if _case_subject == true && _case_subject_1 == true {
+      return int64(1)
+    }
+    if _case_subject == true && _case_subject_1 == false {
+      return int64(2)
+    }
+    if _case_subject == false && _case_subject_1 == true {
+      return int64(3)
+    }
+    if _case_subject == false && _case_subject_1 == false {
+      return int64(4)
+    }
+    panic("non-exhaustive case")
+  }())
+}

@@ -184,3 +184,91 @@ pub fn go(x: Int) -> Int {
     );
 }
 
+
+#[test]
+fn case_multi_subject_literals() {
+    assert_go!(
+        r#"
+pub fn go(x: Int, y: Int) -> Int {
+  case x, y {
+    0, 0 -> 1
+    1, 2 -> 2
+    _, _ -> 0
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_multi_subject_mixed_literal_and_discard() {
+    assert_go!(
+        r#"
+pub fn go(x: Int, y: Int) -> Int {
+  case x, y {
+    0, _ -> 10
+    _, 0 -> 20
+    _, _ -> 30
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_multi_subject_with_variable_bindings() {
+    assert_go!(
+        r#"
+pub fn go(x: Int, y: Int) -> Int {
+  case x, y {
+    0, n -> n
+    n, 0 -> n
+    a, b -> a + b
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_multi_subject_all_variables() {
+    assert_go!(
+        r#"
+pub fn go(x: Int, y: Int) -> Int {
+  case x, y {
+    a, b -> a * b
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_multi_subject_evaluates_each_once() {
+    assert_go!(
+        r#"
+pub fn go(x: Int, y: Int) -> Int {
+  case x + 1, y * 2 {
+    0, 0 -> 1
+    _, _ -> 0
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn case_multi_subject_bool() {
+    assert_go!(
+        r#"
+pub fn go(a: Bool, b: Bool) -> Int {
+  case a, b {
+    True, True -> 1
+    True, False -> 2
+    False, True -> 3
+    False, False -> 4
+  }
+}
+"#,
+    );
+}

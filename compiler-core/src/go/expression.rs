@@ -258,27 +258,27 @@ impl<'a> Generator<'a> {
         clauses: &'a [TypedClause],
         return_type: &Type,
     ) -> Document<'a> {
-        if subjects.len() != 1 {
-            unimplemented!("Go codegen: multi-subject case not yet supported");
-        }
-        let subject_doc = self.expression(&subjects[0]);
-
-        // The subject must be evaluated exactly once even though it is
-        // referenced from every clause condition. Bind it to a synthetic
-        // local; `register_local` already handles collisions with user
-        // bindings via the `used_go_names` set.
+        // Each subject must be evaluated exactly once even though it is
+        // referenced from every clause's per-position condition. Bind each
+        // to a synthetic local; `register_local` mangles against
+        // `used_go_names` so concurrent or nested case expressions get
+        // distinct slots automatically.
         let saved_names = self.local_names.clone();
-        let subject_name = self.register_local(&"_case_subject".into());
-
-        let mut body_docs: Vec<Document<'a>> = Vec::with_capacity(clauses.len() + 2);
-        body_docs.push(docvec![
-            subject_name.clone().to_doc(),
-            " := ",
-            subject_doc,
-            line(),
-            "_ = ",
-            subject_name.clone().to_doc(),
-        ]);
+        let mut body_docs: Vec<Document<'a>> = Vec::with_capacity(subjects.len() + clauses.len() + 1);
+        let mut subject_names: Vec<EcoString> = Vec::with_capacity(subjects.len());
+        for subject in subjects {
+            let subject_doc = self.expression(subject);
+            let name = self.register_local(&"_case_subject".into());
+            body_docs.push(docvec![
+                name.clone().to_doc(),
+                " := ",
+                subject_doc,
+                line(),
+                "_ = ",
+                name.clone().to_doc(),
+            ]);
+            subject_names.push(name);
+        }
 
         let mut catch_all_emitted = false;
         for clause in clauses {
@@ -288,15 +288,20 @@ impl<'a> Generator<'a> {
             if clause.guard.is_some() {
                 unimplemented!("Go codegen: case guards not yet supported");
             }
-            if clause.pattern.len() != 1 {
-                unimplemented!("Go codegen: multi-subject case not yet supported");
-            }
             // Pattern bindings (e.g. `x -> ...`) only live for one clause,
             // so save and restore the local-name scope around lowering and
             // body generation.
             let saved_clause_names = self.local_names.clone();
-            let (condition, bindings) =
-                self.lower_case_pattern(&subject_name, &clause.pattern[0]);
+            let mut conditions: Vec<Document<'a>> = Vec::new();
+            let mut bindings: Vec<Document<'a>> = Vec::new();
+            for (subject_name, pattern) in subject_names.iter().zip(clause.pattern.iter()) {
+                let (condition, pattern_bindings) =
+                    self.lower_case_pattern(subject_name, pattern);
+                if let Some(condition) = condition {
+                    conditions.push(condition);
+                }
+                bindings.extend(pattern_bindings);
+            }
             let body = self.expression(&clause.then);
             self.local_names = saved_clause_names;
 
@@ -304,22 +309,22 @@ impl<'a> Generator<'a> {
             clause_body.push(docvec!["return ", body]);
             let clause_body_doc = join(clause_body, line());
 
-            match condition {
-                Some(condition) => {
-                    body_docs.push(docvec![
-                        "if ",
-                        condition,
-                        " {",
-                        docvec![line(), clause_body_doc].nest(INDENT),
-                        line(),
-                        "}",
-                    ]);
-                }
-                None => {
-                    body_docs.push(clause_body_doc);
-                    catch_all_emitted = true;
-                    break;
-                }
+            if conditions.is_empty() {
+                body_docs.push(clause_body_doc);
+                catch_all_emitted = true;
+                break;
+            } else {
+                // `==` binds tighter than `&&` in Go, so the per-position
+                // equality tests do not need parentheses around them.
+                let condition_doc = join(conditions, " && ".to_doc());
+                body_docs.push(docvec![
+                    "if ",
+                    condition_doc,
+                    " {",
+                    docvec![line(), clause_body_doc].nest(INDENT),
+                    line(),
+                    "}",
+                ]);
             }
         }
 
