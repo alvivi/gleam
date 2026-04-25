@@ -245,7 +245,127 @@ impl<'a> Generator<'a> {
             } => self.bin_op(*name, left, right),
             TypedExpr::NegateBool { value, .. } => docvec!["!", self.expression(value)],
             TypedExpr::NegateInt { value, .. } => docvec!["-", self.expression(value)],
+            TypedExpr::Case {
+                subjects, clauses, ..
+            } => self.case_expr(subjects, clauses, &expression.type_()),
             _ => unimplemented!("Go codegen: expression kind not yet supported"),
+        }
+    }
+
+    fn case_expr(
+        &mut self,
+        subjects: &'a [TypedExpr],
+        clauses: &'a [TypedClause],
+        return_type: &Type,
+    ) -> Document<'a> {
+        if subjects.len() != 1 {
+            unimplemented!("Go codegen: multi-subject case not yet supported");
+        }
+        let subject_doc = self.expression(&subjects[0]);
+
+        // The subject must be evaluated exactly once even though it is
+        // referenced from every clause condition. Bind it to a synthetic
+        // local; `register_local` already handles collisions with user
+        // bindings via the `used_go_names` set.
+        let saved_names = self.local_names.clone();
+        let subject_name = self.register_local(&"_case_subject".into());
+
+        let mut body_docs: Vec<Document<'a>> = Vec::with_capacity(clauses.len() + 2);
+        body_docs.push(docvec![
+            subject_name.clone().to_doc(),
+            " := ",
+            subject_doc,
+            line(),
+            "_ = ",
+            subject_name.clone().to_doc(),
+        ]);
+
+        let mut catch_all_emitted = false;
+        for clause in clauses {
+            if !clause.alternative_patterns.is_empty() {
+                unimplemented!("Go codegen: alternative case patterns not yet supported");
+            }
+            if clause.guard.is_some() {
+                unimplemented!("Go codegen: case guards not yet supported");
+            }
+            if clause.pattern.len() != 1 {
+                unimplemented!("Go codegen: multi-subject case not yet supported");
+            }
+            let body = self.expression(&clause.then);
+            let return_doc = docvec!["return ", body];
+            match self.case_literal_test(&subject_name, &clause.pattern[0]) {
+                Some(condition) => {
+                    body_docs.push(docvec![
+                        "if ",
+                        condition,
+                        " {",
+                        docvec![line(), return_doc].nest(INDENT),
+                        line(),
+                        "}",
+                    ]);
+                }
+                None => {
+                    body_docs.push(return_doc);
+                    catch_all_emitted = true;
+                    break;
+                }
+            }
+        }
+
+        // Gleam's exhaustiveness check guarantees every value is matched, but
+        // Go's flow analyser cannot see that. A trailing panic on the absent
+        // catch-all keeps the generated function well-formed.
+        if !catch_all_emitted {
+            body_docs.push("panic(\"non-exhaustive case\")".to_doc());
+        }
+
+        self.local_names = saved_names;
+
+        docvec![
+            "(func() ",
+            self.go_type(return_type),
+            " {",
+            docvec![line(), join(body_docs, line())].nest(INDENT),
+            line(),
+            "}())",
+        ]
+    }
+
+    fn case_literal_test(
+        &mut self,
+        subject: &EcoString,
+        pattern: &'a TypedPattern,
+    ) -> Option<Document<'a>> {
+        match pattern {
+            Pattern::Discard { .. } => None,
+            Pattern::Int { value, .. } => Some(docvec![
+                subject.clone().to_doc(),
+                " == ",
+                numeric_literal("int64", value),
+            ]),
+            Pattern::Float { value, .. } => Some(docvec![
+                subject.clone().to_doc(),
+                " == ",
+                numeric_literal("float64", value),
+            ]),
+            Pattern::String { value, .. } => Some(docvec![
+                subject.clone().to_doc(),
+                " == ",
+                string_literal(value),
+            ]),
+            Pattern::Constructor {
+                name, arguments, ..
+            } if arguments.is_empty() => {
+                let go_value = match name.as_str() {
+                    "True" => "true",
+                    "False" => "false",
+                    _ => unimplemented!(
+                        "Go codegen: case on custom-type constructors not yet supported"
+                    ),
+                };
+                Some(docvec![subject.clone().to_doc(), " == ", go_value])
+            }
+            _ => unimplemented!("Go codegen: case pattern kind not yet supported"),
         }
     }
 

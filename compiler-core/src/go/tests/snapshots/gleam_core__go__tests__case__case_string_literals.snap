@@ -1,0 +1,32 @@
+---
+source: compiler-core/src/go/tests/case.rs
+assertion_line: 35
+expression: "\npub fn go(x: String) -> Int {\n  case x {\n    \"hello\" -> 1\n    \"world\" -> 2\n    _ -> 0\n  }\n}\n"
+---
+----- SOURCE CODE
+
+pub fn go(x: String) -> Int {
+  case x {
+    "hello" -> 1
+    "world" -> 2
+    _ -> 0
+  }
+}
+
+
+----- COMPILED GO
+package thepackage
+
+func Go(x string) int64 {
+  return (func() int64 {
+    _case_subject := x
+    _ = _case_subject
+    if _case_subject == "hello" {
+      return int64(1)
+    }
+    if _case_subject == "world" {
+      return int64(2)
+    }
+    return int64(0)
+  }())
+}

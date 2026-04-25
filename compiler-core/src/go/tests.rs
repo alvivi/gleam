@@ -16,6 +16,7 @@ mod assert;
 mod assignments;
 mod blocks;
 mod bools;
+mod case;
 mod functions;
 mod modules;
 mod numbers;
