@@ -1,9 +1,16 @@
 # test/project_go
 
-A fixture that exercises the Gleam Go-backend M2 feature set end-to-end:
-literals, arithmetic, `let` with shadowing, block expressions, direct and
-recursive calls, and `assert`. FFI (`@external(go, ...)`) is deferred to
-M6, so the program intentionally avoids the Go standard library.
+A fixture that exercises the Gleam Go-backend feature set end-to-end
+through M3:
+
+- **M2:** literals, arithmetic, `let` with shadowing, block expressions,
+  direct and recursive calls, and `assert`.
+- **M3:** `case` on literals / variable bindings / guards (single and
+  multi-subject), anonymous functions, closures, capture syntax
+  (`f(_, x)`), and `use` sugar.
+
+FFI (`@external(go, ...)`) is deferred to M6, so the program
+intentionally avoids the Go standard library.
 
 ## Compiling
 
@@ -43,4 +50,4 @@ cd build/dev/go/project_go
 go run ./cmd/run
 ```
 
-Expected output: `22`.
+Expected output: `181`.
