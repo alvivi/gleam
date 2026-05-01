@@ -94,14 +94,7 @@ impl<'a> Generator<'a> {
             None => "anonymous".into(),
         };
 
-        let params = f.arguments.iter().map(|arg| {
-            let param_name = match arg.names.get_variable_name() {
-                Some(n) => self.register_local(n),
-                None => "_".into(),
-            };
-            docvec![param_name.to_doc(), " ", self.go_type(&arg.type_)]
-        });
-
+        let params = f.arguments.iter().map(|arg| self.parameter(arg));
         let params_doc = join(params, ", ".to_doc());
         let return_type = self.go_type(&f.return_type);
         let body = self.function_body(&f.body, &f.return_type);
@@ -139,27 +132,22 @@ impl<'a> Generator<'a> {
 
     fn statement(&mut self, statement: &'a TypedStatement, is_last: bool) -> Document<'a> {
         match statement {
-            Statement::Expression(expr) => {
-                let doc = self.expression(expr);
-                if is_last {
-                    docvec!["return ", doc]
-                } else {
-                    docvec!["_ = ", doc]
-                }
-            }
+            Statement::Expression(expr) => self.expression_statement(expr, is_last),
             Statement::Assignment(assignment) => self.assignment(assignment),
             Statement::Assert(assert) => self.assert(assert),
             // `use` reaches codegen pre-desugared by the typechecker into the
             // call it expands to (`use a <- f(x); rest` becomes
             // `f(x, fn(a) { rest })`), so it lowers like any other call.
-            Statement::Use(use_) => {
-                let doc = self.expression(&use_.call);
-                if is_last {
-                    docvec!["return ", doc]
-                } else {
-                    docvec!["_ = ", doc]
-                }
-            }
+            Statement::Use(use_) => self.expression_statement(&use_.call, is_last),
+        }
+    }
+
+    fn expression_statement(&mut self, expr: &'a TypedExpr, is_last: bool) -> Document<'a> {
+        let doc = self.expression(expr);
+        if is_last {
+            docvec!["return ", doc]
+        } else {
+            docvec!["_ = ", doc]
         }
     }
 
@@ -177,16 +165,7 @@ impl<'a> Generator<'a> {
         match &assignment.pattern {
             Pattern::Variable { name, .. } => {
                 let mangled = self.register_local(name);
-                // `_ = name` keeps Go's unused-variable rule happy even when
-                // Gleam never references the binding.
-                docvec![
-                    mangled.clone().to_doc(),
-                    " := ",
-                    value,
-                    line(),
-                    "_ = ",
-                    mangled.to_doc(),
-                ]
+                self.bind_local(&mangled, value)
             }
             Pattern::Discard { .. } => docvec!["_ = ", value],
             _ => unimplemented!("Go codegen: destructuring let patterns not yet supported"),
@@ -209,6 +188,41 @@ impl<'a> Generator<'a> {
         let _ = self.used_go_names.insert(mangled.clone());
         let _ = self.local_names.insert(name.clone(), mangled.clone());
         mangled
+    }
+
+    /// Lower a function or closure parameter declaration: registers the
+    /// binding (or `_` for a discard) and pairs it with its Go type.
+    fn parameter(&mut self, arg: &'a TypedArg) -> Document<'a> {
+        let param_name = match arg.names.get_variable_name() {
+            Some(n) => self.register_local(n),
+            None => "_".into(),
+        };
+        docvec![param_name.to_doc(), " ", self.go_type(&arg.type_)]
+    }
+
+    /// Run `f` in a saved-and-restored `local_names` scope. `local_counts`
+    /// and `used_go_names` deliberately stay mutated: a later rebind of the
+    /// same Gleam name must still get a fresh suffix and never collide with
+    /// one a now-closed scope already claimed in the same function body.
+    fn with_scope<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let saved = self.local_names.clone();
+        let result = f(self);
+        self.local_names = saved;
+        result
+    }
+
+    /// Emit `mangled := value` followed by `_ = mangled`. The discard line
+    /// keeps Go's unused-variable rule happy when the Gleam source never
+    /// references the binding.
+    fn bind_local(&self, mangled: &EcoString, value: Document<'a>) -> Document<'a> {
+        docvec![
+            mangled.clone().to_doc(),
+            " := ",
+            value,
+            line(),
+            "_ = ",
+            mangled.clone().to_doc(),
+        ]
     }
 
     fn lookup_local(&self, name: &EcoString) -> EcoString {
@@ -275,26 +289,14 @@ impl<'a> Generator<'a> {
             .return_type()
             .expect("anonymous function expression must have a function type");
 
-        // Save the local-name scope so parameters do not shadow outer
-        // bindings after the closure ends. `local_counts` and `used_go_names`
-        // intentionally remain mutated so a later rebind of the same name
-        // gets a fresh suffix and never collides with one a closure already
-        // claimed inside the enclosing function.
-        let saved_names = self.local_names.clone();
-
-        let params: Vec<Document<'a>> = arguments
-            .iter()
-            .map(|arg| {
-                let param_name = match arg.names.get_variable_name() {
-                    Some(n) => self.register_local(n),
-                    None => "_".into(),
-                };
-                docvec![param_name.to_doc(), " ", self.go_type(&arg.type_)]
-            })
-            .collect();
-
-        let body_doc = self.function_body(body, &return_type);
-        self.local_names = saved_names;
+        let (params, body_doc) = self.with_scope(|s| {
+            let params: Vec<Document<'a>> = arguments
+                .iter()
+                .map(|arg| s.parameter(arg))
+                .collect();
+            let body_doc = s.function_body(body, &return_type);
+            (params, body_doc)
+        });
 
         docvec![
             "func(",
@@ -319,106 +321,96 @@ impl<'a> Generator<'a> {
         // to a synthetic local; `register_local` mangles against
         // `used_go_names` so concurrent or nested case expressions get
         // distinct slots automatically.
-        let saved_names = self.local_names.clone();
-        let mut body_docs: Vec<Document<'a>> = Vec::with_capacity(subjects.len() + clauses.len() + 1);
-        let mut subject_names: Vec<EcoString> = Vec::with_capacity(subjects.len());
-        for subject in subjects {
-            let subject_doc = self.expression(subject);
-            let name = self.register_local(&"_case_subject".into());
-            body_docs.push(docvec![
-                name.clone().to_doc(),
-                " := ",
-                subject_doc,
-                line(),
-                "_ = ",
-                name.clone().to_doc(),
-            ]);
-            subject_names.push(name);
-        }
-
-        let mut catch_all_emitted = false;
-        for clause in clauses {
-            if !clause.alternative_patterns.is_empty() {
-                unimplemented!("Go codegen: alternative case patterns not yet supported");
+        let body_docs = self.with_scope(|s| {
+            let mut body_docs: Vec<Document<'a>> =
+                Vec::with_capacity(subjects.len() + clauses.len() + 1);
+            let mut subject_names: Vec<EcoString> = Vec::with_capacity(subjects.len());
+            for subject in subjects {
+                let subject_doc = s.expression(subject);
+                let name = s.register_local(&"_case_subject".into());
+                body_docs.push(s.bind_local(&name, subject_doc));
+                subject_names.push(name);
             }
-            // Pattern bindings (e.g. `x -> ...`) only live for one clause,
-            // so save and restore the local-name scope around lowering and
-            // body generation.
-            let saved_clause_names = self.local_names.clone();
-            let mut conditions: Vec<Document<'a>> = Vec::new();
-            let mut bindings: Vec<Document<'a>> = Vec::new();
-            for (subject_name, pattern) in subject_names.iter().zip(clause.pattern.iter()) {
-                let (condition, pattern_bindings) =
-                    self.lower_case_pattern(subject_name, pattern);
-                if let Some(condition) = condition {
-                    conditions.push(condition);
+
+            let mut catch_all_emitted = false;
+            for clause in clauses {
+                if !clause.alternative_patterns.is_empty() {
+                    unimplemented!("Go codegen: alternative case patterns not yet supported");
                 }
-                bindings.extend(pattern_bindings);
-            }
-            // The guard runs with pattern bindings in scope, so it must be
-            // lowered *after* `lower_case_pattern` registers them and before
-            // the clause-local scope is restored.
-            let guard_doc = clause.guard.as_ref().map(|g| self.lower_guard(g));
-            let body = self.expression(&clause.then);
-            self.local_names = saved_clause_names;
+                // Pattern bindings (e.g. `x -> ...`) only live for one clause,
+                // so the per-clause scope is saved and restored around
+                // lowering and body generation.
+                let (conditions, bindings, guard_doc, body) = s.with_scope(|s| {
+                    let mut conditions: Vec<Document<'a>> = Vec::new();
+                    let mut bindings: Vec<Document<'a>> = Vec::new();
+                    for (subject_name, pattern) in
+                        subject_names.iter().zip(clause.pattern.iter())
+                    {
+                        let (condition, pattern_bindings) =
+                            s.lower_case_pattern(subject_name, pattern);
+                        if let Some(condition) = condition {
+                            conditions.push(condition);
+                        }
+                        bindings.extend(pattern_bindings);
+                    }
+                    // The guard runs with pattern bindings in scope, so it
+                    // must be lowered *after* `lower_case_pattern` registers
+                    // them and before the clause-local scope is restored.
+                    let guard_doc = clause.guard.as_ref().map(|g| s.lower_guard(g));
+                    let body = s.expression(&clause.then);
+                    (conditions, bindings, guard_doc, body)
+                });
 
-            let return_doc = docvec!["return ", body];
-            let conditional_return = match &guard_doc {
-                Some(guard) => docvec![
-                    "if ",
-                    guard.clone(),
-                    " {",
-                    docvec![line(), return_doc].nest(INDENT),
-                    line(),
-                    "}",
-                ],
-                None => return_doc,
-            };
-            let mut clause_body: Vec<Document<'a>> = bindings;
-            clause_body.push(conditional_return);
-            let clause_body_doc = join(clause_body, line());
+                let return_doc = docvec!["return ", body];
+                let conditional_return = match &guard_doc {
+                    Some(guard) => docvec![
+                        "if ",
+                        guard.clone(),
+                        " {",
+                        docvec![line(), return_doc].nest(INDENT),
+                        line(),
+                        "}",
+                    ],
+                    None => return_doc,
+                };
+                let mut clause_body: Vec<Document<'a>> = bindings;
+                clause_body.push(conditional_return);
+                let clause_body_doc = join(clause_body, line());
 
-            if conditions.is_empty() {
-                // No pattern conditions: bindings + body live at the IIFE's
-                // top level. With a guard the clause may still fail, so
-                // execution can fall through to the next clause.
-                body_docs.push(clause_body_doc);
-                if guard_doc.is_none() {
-                    catch_all_emitted = true;
-                    break;
+                if conditions.is_empty() {
+                    // No pattern conditions: bindings + body live at the IIFE's
+                    // top level. With a guard the clause may still fail, so
+                    // execution can fall through to the next clause.
+                    body_docs.push(clause_body_doc);
+                    if guard_doc.is_none() {
+                        catch_all_emitted = true;
+                        break;
+                    }
+                } else {
+                    // `==` binds tighter than `&&` in Go, so the per-position
+                    // equality tests do not need parentheses around them.
+                    let condition_doc = join(conditions, " && ".to_doc());
+                    body_docs.push(docvec![
+                        "if ",
+                        condition_doc,
+                        " {",
+                        docvec![line(), clause_body_doc].nest(INDENT),
+                        line(),
+                        "}",
+                    ]);
                 }
-            } else {
-                // `==` binds tighter than `&&` in Go, so the per-position
-                // equality tests do not need parentheses around them.
-                let condition_doc = join(conditions, " && ".to_doc());
-                body_docs.push(docvec![
-                    "if ",
-                    condition_doc,
-                    " {",
-                    docvec![line(), clause_body_doc].nest(INDENT),
-                    line(),
-                    "}",
-                ]);
             }
-        }
 
-        // Gleam's exhaustiveness check guarantees every value is matched, but
-        // Go's flow analyser cannot see that. A trailing panic on the absent
-        // catch-all keeps the generated function well-formed.
-        if !catch_all_emitted {
-            body_docs.push("panic(\"non-exhaustive case\")".to_doc());
-        }
+            // Gleam's exhaustiveness check guarantees every value is matched,
+            // but Go's flow analyser cannot see that. A trailing panic on the
+            // absent catch-all keeps the generated function well-formed.
+            if !catch_all_emitted {
+                body_docs.push("panic(\"non-exhaustive case\")".to_doc());
+            }
+            body_docs
+        });
 
-        self.local_names = saved_names;
-
-        docvec![
-            "(func() ",
-            self.go_type(return_type),
-            " {",
-            docvec![line(), join(body_docs, line())].nest(INDENT),
-            line(),
-            "}())",
-        ]
+        self.iife(self.go_type(return_type), join(body_docs, line()))
     }
 
     /// Lower a single clause pattern against the bound subject. Returns the
@@ -434,14 +426,7 @@ impl<'a> Generator<'a> {
             Pattern::Discard { .. } => (None, vec![]),
             Pattern::Variable { name, .. } => {
                 let mangled = self.register_local(name);
-                let binding = docvec![
-                    mangled.clone().to_doc(),
-                    " := ",
-                    subject.clone().to_doc(),
-                    line(),
-                    "_ = ",
-                    mangled.to_doc(),
-                ];
+                let binding = self.bind_local(&mangled, subject.clone().to_doc());
                 (None, vec![binding])
             }
             Pattern::Int { value, .. } => (
@@ -529,38 +514,12 @@ impl<'a> Generator<'a> {
         left: Document<'a>,
         right: Document<'a>,
     ) -> Document<'a> {
-        match name {
-            BinOp::DivInt => {
-                self.prelude_used = true;
-                docvec!["prelude.DivInt(", left, ", ", right, ")"]
-            }
-            BinOp::RemainderInt => {
-                self.prelude_used = true;
-                docvec!["prelude.RemInt(", left, ", ", right, ")"]
-            }
-            BinOp::DivFloat => {
-                self.prelude_used = true;
-                docvec!["prelude.DivFloat(", left, ", ", right, ")"]
-            }
-            _ => {
-                let op: Document<'a> = match name {
-                    BinOp::And => " && ".to_doc(),
-                    BinOp::Or => " || ".to_doc(),
-                    BinOp::Eq => " == ".to_doc(),
-                    BinOp::NotEq => " != ".to_doc(),
-                    BinOp::LtInt | BinOp::LtFloat => " < ".to_doc(),
-                    BinOp::LtEqInt | BinOp::LtEqFloat => " <= ".to_doc(),
-                    BinOp::GtInt | BinOp::GtFloat => " > ".to_doc(),
-                    BinOp::GtEqInt | BinOp::GtEqFloat => " >= ".to_doc(),
-                    BinOp::AddInt | BinOp::AddFloat => " + ".to_doc(),
-                    BinOp::SubInt | BinOp::SubFloat => " - ".to_doc(),
-                    BinOp::MultInt | BinOp::MultFloat => " * ".to_doc(),
-                    BinOp::Concatenate => " + ".to_doc(),
-                    BinOp::DivInt | BinOp::DivFloat | BinOp::RemainderInt => unreachable!(),
-                };
-                docvec!["(", left, op, right, ")"]
-            }
+        if let Some(prelude_fn) = binop_prelude_function(name) {
+            self.prelude_used = true;
+            return docvec!["prelude.", prelude_fn, "(", left, ", ", right, ")"];
         }
+        let op = binop_operator(name).expect("non-prelude BinOp must have a Go operator");
+        docvec!["(", left, op, right, ")"]
     }
 
     fn var(&self, name: &EcoString, constructor: &ValueConstructor) -> Document<'a> {
@@ -611,6 +570,8 @@ impl<'a> Generator<'a> {
             Some(expr) => self.expression(expr),
             None => self.default_message(default_prefix, start),
         };
+        // Single-line IIFE on purpose: the body is a one-shot `panic` call,
+        // so the multi-line `iife` helper would just add noise.
         docvec![
             "(func() ",
             self.go_type(type_),
@@ -638,37 +599,23 @@ impl<'a> Generator<'a> {
         // value slots into an expression context, matching the block
         // encoding; intermediate bindings are registered so later steps can
         // reference them by their synthetic names.
-        let saved_names = self.local_names.clone();
-        let mut body_docs: Vec<Document<'a>> = Vec::with_capacity(assignments.len() + 2);
-        body_docs.push(self.pipeline_assignment(first_value));
-        for (assignment, _kind) in assignments {
-            body_docs.push(self.pipeline_assignment(assignment));
-        }
-        let finally_doc = self.expression(finally);
-        body_docs.push(docvec!["return ", finally_doc]);
-        self.local_names = saved_names;
-
-        docvec![
-            "(func() ",
-            self.go_type(type_),
-            " {",
-            docvec![line(), join(body_docs, line())].nest(INDENT),
-            line(),
-            "}())",
-        ]
+        let body_docs = self.with_scope(|s| {
+            let mut body_docs: Vec<Document<'a>> = Vec::with_capacity(assignments.len() + 2);
+            body_docs.push(s.pipeline_assignment(first_value));
+            for (assignment, _kind) in assignments {
+                body_docs.push(s.pipeline_assignment(assignment));
+            }
+            let finally_doc = s.expression(finally);
+            body_docs.push(docvec!["return ", finally_doc]);
+            body_docs
+        });
+        self.iife(self.go_type(type_), join(body_docs, line()))
     }
 
     fn pipeline_assignment(&mut self, assignment: &'a TypedPipelineAssignment) -> Document<'a> {
         let value = self.expression(&assignment.value);
         let mangled = self.register_local(&assignment.name);
-        docvec![
-            mangled.clone().to_doc(),
-            " := ",
-            value,
-            line(),
-            "_ = ",
-            mangled.to_doc(),
-        ]
+        self.bind_local(&mangled, value)
     }
 
     fn block(&mut self, statements: &'a [TypedStatement], type_: &Type) -> Document<'a> {
@@ -676,66 +623,40 @@ impl<'a> Generator<'a> {
         // IIFE so the block's value slots into the surrounding expression
         // context. Statement lifting is the cleaner encoding but requires a
         // statement accumulator threaded through every expression site.
-        let saved_names = self.local_names.clone();
-        let last_idx = statements.len().saturating_sub(1);
-        let body_docs: Vec<_> = statements
-            .iter()
-            .enumerate()
-            .map(|(i, stmt)| self.statement(stmt, i == last_idx))
-            .collect();
-        self.local_names = saved_names;
-
-        docvec![
-            "(func() ",
-            self.go_type(type_),
-            " {",
-            docvec![line(), join(body_docs, line())].nest(INDENT),
-            line(),
-            "}())",
-        ]
+        let body_docs = self.with_scope(|s| {
+            let last_idx = statements.len().saturating_sub(1);
+            statements
+                .iter()
+                .enumerate()
+                .map(|(i, stmt)| s.statement(stmt, i == last_idx))
+                .collect::<Vec<_>>()
+        });
+        self.iife(self.go_type(type_), join(body_docs, line()))
     }
 
     fn bin_op(&mut self, name: BinOp, left: &'a TypedExpr, right: &'a TypedExpr) -> Document<'a> {
-        match name {
-            BinOp::DivInt => self.prelude_call("DivInt", left, right),
-            BinOp::RemainderInt => self.prelude_call("RemInt", left, right),
-            BinOp::DivFloat => self.prelude_call("DivFloat", left, right),
-            _ => {
-                let op: Document<'a> = match name {
-                    BinOp::And => " && ".to_doc(),
-                    BinOp::Or => " || ".to_doc(),
-                    BinOp::Eq => " == ".to_doc(),
-                    BinOp::NotEq => " != ".to_doc(),
-                    BinOp::LtInt | BinOp::LtFloat => " < ".to_doc(),
-                    BinOp::LtEqInt | BinOp::LtEqFloat => " <= ".to_doc(),
-                    BinOp::GtInt | BinOp::GtFloat => " > ".to_doc(),
-                    BinOp::GtEqInt | BinOp::GtEqFloat => " >= ".to_doc(),
-                    BinOp::AddInt | BinOp::AddFloat => " + ".to_doc(),
-                    BinOp::SubInt | BinOp::SubFloat => " - ".to_doc(),
-                    BinOp::MultInt | BinOp::MultFloat => " * ".to_doc(),
-                    BinOp::Concatenate => " + ".to_doc(),
-                    BinOp::DivInt | BinOp::DivFloat | BinOp::RemainderInt => unreachable!(),
-                };
-                docvec!["(", self.expression(left), op, self.expression(right), ")"]
-            }
+        let left_doc = self.expression(left);
+        let right_doc = self.expression(right);
+        if let Some(prelude_fn) = binop_prelude_function(name) {
+            self.prelude_used = true;
+            return docvec!["prelude.", prelude_fn, "(", left_doc, ", ", right_doc, ")"];
         }
+        let op = binop_operator(name).expect("non-prelude BinOp must have a Go operator");
+        docvec!["(", left_doc, op, right_doc, ")"]
     }
 
-    fn prelude_call(
-        &mut self,
-        function: &'static str,
-        left: &'a TypedExpr,
-        right: &'a TypedExpr,
-    ) -> Document<'a> {
-        self.prelude_used = true;
+    /// Wrap a multi-statement body in an immediately-invoked Go function
+    /// literal returning `return_type`. Lets statement-shaped Gleam constructs
+    /// (blocks, pipelines, case) slot into Go expression positions without
+    /// lifting a statement accumulator out to the call site.
+    fn iife(&self, return_type: Document<'a>, body: Document<'a>) -> Document<'a> {
         docvec![
-            "prelude.",
-            function,
-            "(",
-            self.expression(left),
-            ", ",
-            self.expression(right),
-            ")",
+            "(func() ",
+            return_type,
+            " {",
+            docvec![line(), body].nest(INDENT),
+            line(),
+            "}())",
         ]
     }
 
@@ -756,6 +677,38 @@ impl<'a> Generator<'a> {
         } else {
             unimplemented!("Go codegen: complex types not yet supported")
         }
+    }
+}
+
+/// Go infix operator for a Gleam BinOp, or `None` if the operator routes
+/// through the prelude instead (see `binop_prelude_function`).
+fn binop_operator(name: BinOp) -> Option<&'static str> {
+    match name {
+        BinOp::And => Some(" && "),
+        BinOp::Or => Some(" || "),
+        BinOp::Eq => Some(" == "),
+        BinOp::NotEq => Some(" != "),
+        BinOp::LtInt | BinOp::LtFloat => Some(" < "),
+        BinOp::LtEqInt | BinOp::LtEqFloat => Some(" <= "),
+        BinOp::GtInt | BinOp::GtFloat => Some(" > "),
+        BinOp::GtEqInt | BinOp::GtEqFloat => Some(" >= "),
+        BinOp::AddInt | BinOp::AddFloat => Some(" + "),
+        BinOp::SubInt | BinOp::SubFloat => Some(" - "),
+        BinOp::MultInt | BinOp::MultFloat => Some(" * "),
+        BinOp::Concatenate => Some(" + "),
+        BinOp::DivInt | BinOp::DivFloat | BinOp::RemainderInt => None,
+    }
+}
+
+/// Prelude helper name for the Gleam BinOps whose Go semantics differ from
+/// the native operator (Gleam division and remainder must return zero on a
+/// zero divisor rather than panic the way Go's `/` and `%` do).
+fn binop_prelude_function(name: BinOp) -> Option<&'static str> {
+    match name {
+        BinOp::DivInt => Some("DivInt"),
+        BinOp::RemainderInt => Some("RemInt"),
+        BinOp::DivFloat => Some("DivFloat"),
+        _ => None,
     }
 }
 
